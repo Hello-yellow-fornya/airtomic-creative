@@ -11,9 +11,10 @@ See [docs/prototype.html](./docs/prototype.html) for the UI reference.
 
 ```
 migrations/    plain SQL, numbered, forward-only
-web/           Next.js 15 app (Vercel)
-worker/        Python worker — scene detect, tag, render, push
+web/           Next.js 15 app (Vercel) — not built yet
+worker/        Python worker — ingest today; scene detect, tag, render, push later
 modal/         Modal GPU function for WhisperX
+scripts/       CLI utilities (upload_video.py)
 docs/          brief + clickable prototype
 ```
 
@@ -21,15 +22,40 @@ docs/          brief + clickable prototype
 
 ```bash
 cp .env.example .env        # fill in
-psql $DATABASE_URL -f migrations/0001_extensions.sql
-# ...run each migration in order
-```
-
-Or all at once:
-
-```bash
 for f in migrations/*.sql; do psql $DATABASE_URL -v ON_ERROR_STOP=1 -f "$f"; done
 ```
+
+### Modal (WhisperX)
+
+```bash
+pip install modal && modal setup
+modal secret create huggingface HF_TOKEN=<token>          # see .env.example for the pyannote gotcha
+modal secret create airtomic-transcribe-auth MODAL_TOKEN=<random>
+modal deploy modal/transcribe.py                          # prints the URL for MODAL_TRANSCRIBE_URL
+```
+
+The first deploy bakes model weights (several GB) into the image, so it is
+slow once; cold starts after that don't download anything.
+
+### Worker
+
+```bash
+pip install -r worker/requirements.txt    # plus ffmpeg on the machine
+python -m worker.main
+```
+
+On Railway: deploy with `worker/Dockerfile`, build context at the repo root.
+
+### Ingest a video
+
+```bash
+python scripts/upload_video.py path/to/podcast.mp4 --title "Ep 12"
+```
+
+Uploads to R2 via presigned URLs (multipart above 64 MiB), inserts the
+`videos` row, and queues an `ingest` job. The worker picks it up: probes
+metadata, extracts 16kHz mono WAV, transcribes on Modal, writes
+`transcripts` / `transcript_segments` / `transcript_words`.
 
 ## Constraints worth knowing before you touch anything
 
