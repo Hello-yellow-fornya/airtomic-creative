@@ -1,0 +1,2915 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Klira Creative Builder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+<style>
+:root{
+  --paper:#F5F4F0;
+  --surface:#FFFFFF;
+  --ink:#15161A;
+  --muted:#6C6E74;
+  --faint:#9A9CA2;
+  --line:#E3E1DB;
+  --line-2:#EFEDE7;
+  --signal:#FFC629;
+  --signal-deep:#C99400;
+  --teal:#0E5F5C;
+  --rose:#C4436E;
+  --radius:3px;
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{
+  background:var(--paper);
+  color:var(--ink);
+  font-family:'Inter',system-ui,sans-serif;
+  font-size:13px;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+:focus-visible{outline:2px solid var(--signal-deep);outline-offset:2px}
+
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.eyebrow{
+  font-family:'JetBrains Mono',monospace;
+  font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--faint);font-weight:500;
+}
+
+/* ---------- shell ---------- */
+.app{display:grid;grid-template-columns:200px 1fr;min-height:100vh}
+
+.rail{
+  background:var(--ink);color:#EDECE8;
+  padding:18px 0;display:flex;flex-direction:column;
+  position:sticky;top:0;height:100vh;
+}
+.brand{padding:0 18px 20px;border-bottom:1px solid #2A2C31;margin-bottom:14px}
+.brand-mark{
+  font-family:'Archivo',sans-serif;font-weight:700;font-size:15px;
+  letter-spacing:-.02em;display:flex;align-items:center;gap:7px;
+}
+.dot{width:8px;height:8px;background:var(--signal);border-radius:50%;flex:none}
+.brand-sub{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.12em;
+  text-transform:uppercase;color:#7C7E85;margin-top:5px;padding-left:15px}
+
+.nav{display:flex;flex-direction:column;gap:1px;padding:0 10px}
+.nav-label{padding:12px 8px 5px;font-family:'JetBrains Mono',monospace;font-size:9px;
+  letter-spacing:.12em;text-transform:uppercase;color:#66686F}
+.nav-item{
+  display:flex;align-items:center;gap:9px;width:100%;text-align:left;
+  padding:7px 8px;border-radius:var(--radius);color:#B9BABF;font-size:12.5px;
+  transition:background .12s,color .12s;
+}
+.nav-item:hover{background:#22242A;color:#EDECE8}
+.nav-item[aria-current="true"]{background:#2C2E35;color:#fff;font-weight:500}
+.nav-item[aria-current="true"] .idx{color:var(--signal)}
+.idx{font-family:'JetBrains Mono',monospace;font-size:10px;color:#5E6067;width:14px;flex:none}
+
+.rail-foot{margin-top:auto;padding:14px 18px 0;border-top:1px solid #2A2C31}
+.rail-foot p{font-size:10.5px;color:#7C7E85;line-height:1.45}
+
+/* ---------- main ---------- */
+.main{min-width:0}
+.topbar{
+  background:var(--surface);border-bottom:1px solid var(--line);
+  padding:16px 28px;display:flex;align-items:flex-end;justify-content:space-between;
+  gap:20px;flex-wrap:wrap;position:sticky;top:0;z-index:20;
+}
+.topbar h1{font-family:'Archivo',sans-serif;font-size:20px;font-weight:600;letter-spacing:-.02em}
+.topbar .sub{color:var(--muted);font-size:12px;margin-top:2px}
+.screen{padding:24px 28px 60px;display:none}
+.screen.on{display:block}
+
+/* ---------- primitives ---------- */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius)}
+.pad{padding:16px}
+.row{display:flex;gap:14px}
+.stack{display:flex;flex-direction:column;gap:14px}
+h2.sec{font-family:'Archivo',sans-serif;font-size:13px;font-weight:600;letter-spacing:.01em;
+  margin-bottom:10px;display:flex;align-items:center;gap:8px}
+h2.sec::after{content:"";flex:1;height:1px;background:var(--line)}
+
+.btn{
+  border:1px solid var(--ink);background:var(--ink);color:#fff;
+  padding:7px 13px;border-radius:var(--radius);font-size:12px;font-weight:500;
+  transition:opacity .12s;
+}
+.btn:hover{opacity:.85}
+.btn.ghost{background:transparent;color:var(--ink);border-color:var(--line)}
+.btn.ghost:hover{background:var(--paper);opacity:1}
+.btn.signal{background:var(--signal);border-color:var(--signal);color:var(--ink);font-weight:600}
+.btn.sm{padding:5px 10px;font-size:11.5px}
+
+.tag{
+  display:inline-block;padding:2px 7px;border-radius:2px;font-size:10.5px;
+  background:var(--paper);border:1px solid var(--line);color:var(--muted);
+  font-family:'JetBrains Mono',monospace;letter-spacing:.01em;
+}
+.tag.hot{background:#FFF6DC;border-color:#F0DCA0;color:#7A5A00}
+.tag.flag{background:#FDF0F4;border-color:#F0CEDA;color:#9A2F53}
+
+/* ---------- library ---------- */
+.grid-assets{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.asset{overflow:hidden;text-align:left;width:100%;display:block;transition:border-color .12s}
+.asset:hover{border-color:var(--ink)}
+.thumb{
+  aspect-ratio:16/9;position:relative;
+  background:linear-gradient(135deg,#2B3140 0%,#4A5468 55%,#6E7A8F 100%);
+  display:flex;align-items:center;justify-content:center;gap:26px;
+}
+.head{width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.26)}
+.head.b{background:rgba(255,255,255,.18)}
+.thumb .dur{
+  position:absolute;bottom:7px;right:7px;background:rgba(0,0,0,.68);color:#fff;
+  padding:2px 6px;border-radius:2px;font-size:10px;
+}
+.thumb .badge{
+  position:absolute;top:7px;left:7px;background:var(--signal);color:var(--ink);
+  padding:2px 7px;border-radius:2px;font-size:10px;font-weight:600;
+  font-family:'JetBrains Mono',monospace;
+}
+.asset-meta{padding:11px 12px 13px}
+.asset-meta h3{font-size:13px;font-weight:600;margin-bottom:3px;letter-spacing:-.01em}
+.asset-meta .m{font-size:11px;color:var(--muted)}
+
+table.ads{width:100%;border-collapse:collapse;font-size:12px}
+table.ads th{
+  text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);
+  font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--faint);font-weight:500;
+}
+table.ads td{padding:9px 10px;border-bottom:1px solid var(--line-2);vertical-align:middle}
+table.ads tr:last-child td{border-bottom:none}
+table.ads td.num{font-family:'JetBrains Mono',monospace;text-align:right;font-variant-numeric:tabular-nums}
+.bar{height:3px;background:var(--line);border-radius:2px;overflow:hidden;margin-top:4px;width:64px}
+.bar i{display:block;height:100%;background:var(--teal)}
+
+/* ---------- timeline (signature) ---------- */
+.tl-wrap{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px}
+.tl-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px}
+.ruler{display:flex;justify-content:space-between;margin-bottom:5px}
+.ruler span{font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--faint)}
+
+.tl{position:relative;user-select:none}
+.lane{position:relative;height:var(--h,20px);background:var(--paper);
+  border:1px solid var(--line-2);border-radius:2px;margin-bottom:5px;overflow:hidden}
+.lane-tag{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--faint);margin-bottom:3px}
+
+.scene{position:absolute;top:0;bottom:0;border-right:1px solid #CFCDC6}
+.spk{position:absolute;top:3px;bottom:3px;border-radius:2px}
+.spk.a{background:#25627F}
+.spk.b{background:#8FA6B4}
+
+.rec{
+  position:absolute;top:50%;transform:translate(-50%,-50%);
+  width:22px;height:22px;background:var(--signal);border-radius:3px;
+  cursor:pointer;border:1px solid var(--signal-deep);transition:filter .12s,box-shadow .12s;
+  display:flex;align-items:center;justify-content:center;
+}
+.rec:hover{filter:brightness(.94)}
+.rec[data-on="1"]{box-shadow:0 0 0 2px var(--ink)}
+.rec span{
+  font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:var(--ink);
+  line-height:1;pointer-events:none;
+}
+
+.playhead{position:absolute;top:0;bottom:0;width:1px;background:var(--rose);pointer-events:none;z-index:5}
+.playhead::before{content:"";position:absolute;top:-4px;left:-3.5px;width:8px;height:8px;
+  background:var(--rose);border-radius:50%}
+
+/* ---------- transcript ---------- */
+.tx{max-height:420px;overflow-y:auto;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface)}
+.tx-line{display:grid;grid-template-columns:74px 60px 1fr;gap:12px;padding:8px 14px;
+  border-bottom:1px solid var(--line-2);transition:background .1s;cursor:pointer}
+.tx-line:hover{background:var(--paper)}
+.tx-line:last-child{border-bottom:none}
+.tx-line.mark{background:#FFFAEC}
+.tx-line.mark:hover{background:#FFF6DC}
+.tx-t{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--faint);padding-top:1px}
+.tx-s{font-size:10.5px;font-weight:600;color:var(--muted);padding-top:1px}
+.tx-x{font-size:12.5px;line-height:1.55}
+.tx-x em{font-style:normal;background:#FFEDB8;padding:0 1px;border-radius:1px}
+
+/* ---------- recommendations ---------- */
+.recs{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.rc{padding:15px;position:relative;display:flex;flex-direction:column;gap:9px}
+.rc-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.rc-time{font-family:'JetBrains Mono',monospace;font-size:11.5px;font-weight:500}
+.rc-dur{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--faint);margin-top:1px}
+.rc-q{font-size:13.5px;line-height:1.5;font-weight:500;letter-spacing:-.005em}
+.rc-why{font-size:11.5px;color:var(--muted);line-height:1.5;border-left:2px solid var(--signal);padding-left:9px}
+.rc-tags{display:flex;flex-wrap:wrap;gap:4px}
+.rc-foot{display:flex;justify-content:space-between;align-items:center;
+  border-top:1px solid var(--line-2);padding-top:9px;margin-top:auto}
+.evidence{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--faint)}
+
+.note{
+  background:#FFFBF0;border:1px solid #F0E2BC;border-left:3px solid var(--signal);
+  border-radius:var(--radius);padding:12px 14px;font-size:12px;line-height:1.55;color:#5C4E24;
+}
+.note strong{color:#3D3316}
+
+/* ---------- clip builder ---------- */
+.build{display:grid;grid-template-columns:1fr 300px;gap:16px;align-items:start}
+@media(max-width:980px){.build{grid-template-columns:1fr}}
+
+.stage{background:var(--ink);border-radius:var(--radius);padding:20px;display:flex;
+  justify-content:center;align-items:center;min-height:340px}
+.src{
+  position:relative;width:100%;max-width:520px;aspect-ratio:16/9;border-radius:2px;overflow:hidden;
+  background:linear-gradient(135deg,#2B3140 0%,#4A5468 55%,#6E7A8F 100%);
+}
+.src .figs{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:120px}
+.fig{width:64px;height:64px;border-radius:50%;background:rgba(255,255,255,.24)}
+.fig.b{background:rgba(255,255,255,.15)}
+.crop{
+  position:absolute;top:0;bottom:0;width:28.125%;
+  box-shadow:0 0 0 9999px rgba(0,0,0,.62);
+  cursor:grab;touch-action:none;
+}
+.crop:active,.crop.drag{cursor:grabbing}
+.crop::before{
+  content:"";position:absolute;inset:0;
+  border:1px solid rgba(255,255,255,.9);
+}
+.lay-lower{position:absolute;left:0;right:0;bottom:0;display:none;
+  align-items:center;justify-content:center;box-shadow:0 -1px 0 rgba(255,255,255,.5)}
+.lay-lower::after{content:"";width:38%;aspect-ratio:1;border-radius:50%;background:rgba(255,255,255,.5)}
+.lay-card{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:#1B1D22}
+.lay-card::after{content:"";width:46%;height:5px;background:var(--signal);border-radius:2px}
+
+/* corner brackets, iOS style */
+.br{position:absolute;width:15px;height:15px;border:2.5px solid #fff;pointer-events:none}
+.br.tl{top:-1px;left:-1px;border-right:none;border-bottom:none}
+.br.tr{top:-1px;right:-1px;border-left:none;border-bottom:none}
+.br.bl{bottom:-1px;left:-1px;border-right:none;border-top:none}
+.br.br2{bottom:-1px;right:-1px;border-left:none;border-top:none}
+/* rule-of-thirds, only while dragging */
+.grid{position:absolute;inset:0;opacity:0;transition:opacity .15s;pointer-events:none}
+.crop.drag .grid{opacity:1}
+.grid i{position:absolute;background:rgba(255,255,255,.45)}
+.grid i.v{top:0;bottom:0;width:1px}
+.grid i.h{left:0;right:0;height:1px}
+.crop-hint{
+  position:absolute;left:50%;bottom:7px;transform:translateX(-50%);
+  font-family:'JetBrains Mono',monospace;font-size:9px;color:rgba(255,255,255,.85);
+  background:rgba(0,0,0,.45);padding:2px 6px;border-radius:2px;white-space:nowrap;
+  pointer-events:none;transition:opacity .15s;
+}
+.crop.drag .crop-hint{opacity:0}
+
+/* ---------- filmstrip trim ---------- */
+.strip{
+  position:relative;height:52px;margin-top:14px;border-radius:var(--radius);
+  overflow:hidden;background:var(--ink);touch-action:none;user-select:none;
+}
+.frames{position:absolute;inset:0;display:flex}
+.frames i{flex:1;border-right:1px solid rgba(0,0,0,.35)}
+.mask{position:absolute;top:0;bottom:0;background:rgba(10,10,12,.68);pointer-events:none}
+.win{
+  position:absolute;top:0;bottom:0;
+  border-top:3px solid var(--signal);border-bottom:3px solid var(--signal);
+}
+.hnd{
+  position:absolute;top:-3px;bottom:-3px;width:15px;background:var(--signal);
+  cursor:ew-resize;display:flex;align-items:center;justify-content:center;touch-action:none;
+}
+.hnd::after{content:"";width:2px;height:16px;background:rgba(0,0,0,.42);border-radius:1px}
+.hnd.l{left:-15px;border-radius:3px 0 0 3px}
+.hnd.r{right:-15px;border-radius:0 3px 3px 0}
+.strip-ph{position:absolute;top:0;bottom:0;width:2px;background:#fff;pointer-events:none;
+  box-shadow:0 0 4px rgba(0,0,0,.5)}
+.strip-scale{display:flex;justify-content:space-between;margin-top:4px}
+.strip-scale span{font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--faint)}
+
+.cap{position:absolute;left:6%;right:6%;text-align:center;pointer-events:none;z-index:3}
+.cap b{display:inline;font-weight:inherit}
+
+.ctrl{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.ctrl label{display:flex;justify-content:space-between;align-items:baseline;font-size:11.5px;color:var(--muted)}
+.ctrl label b{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--ink);font-weight:500}
+input[type=range]{width:100%;accent-color:var(--ink);height:16px}
+select,input[type=text]{
+  width:100%;padding:6px 8px;border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--surface);font:inherit;font-size:12px;
+}
+.swatches{display:flex;gap:5px;flex-wrap:wrap}
+.sw{width:22px;height:22px;border-radius:2px;border:1px solid var(--line);cursor:pointer}
+.sw[data-on="1"]{box-shadow:0 0 0 2px var(--ink)}
+.toggle{display:flex;align-items:center;gap:7px;font-size:12px;cursor:pointer;padding:3px 0}
+.presets{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px}
+.chip{padding:4px 9px;border:1px solid var(--line);border-radius:12px;font-size:11.5px;background:var(--surface)}
+.chip[data-on="1"]{background:var(--ink);color:#fff;border-color:var(--ink)}
+
+.transport{
+  display:flex;align-items:center;gap:10px;margin-top:12px;padding:9px 12px;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);flex-wrap:wrap;
+}
+.tbtn{
+  width:30px;height:30px;border:1px solid var(--line);border-radius:var(--radius);
+  display:flex;align-items:center;justify-content:center;background:var(--surface);
+  transition:background .12s,border-color .12s;flex:none;
+}
+.tbtn:hover{background:var(--paper);border-color:var(--ink)}
+.tbtn.pri{background:var(--ink);border-color:var(--ink)}
+.tbtn.pri svg{fill:#fff}
+.tbtn svg{width:11px;height:11px;fill:var(--ink);display:block}
+.tc{font-size:11.5px;color:var(--muted);white-space:nowrap;flex:none}
+.tc b{color:var(--ink);font-weight:500}
+#scrub{flex:1;min-width:120px}
+.speeds{display:flex;gap:3px;flex:none}
+.spd{
+  padding:3px 7px;border:1px solid var(--line);border-radius:2px;background:var(--surface);
+  font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--muted);
+}
+.spd:hover{border-color:var(--ink);color:var(--ink)}
+.spd[data-on="1"]{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:700}
+
+.trim{display:flex;gap:10px;align-items:center;margin-top:12px;flex-wrap:wrap}
+.trim .fld{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted)}
+.trim input{width:88px;font-family:'JetBrains Mono',monospace;font-size:11.5px}
+
+/* ---------- upload ---------- */
+.drop{
+  border:1.5px dashed var(--line);border-radius:var(--radius);background:var(--surface);
+  padding:22px;text-align:center;transition:border-color .15s,background .15s;cursor:pointer;
+}
+.drop:hover,.drop.over{border-color:var(--signal-deep);background:#FFFCF3}
+.drop h3{font-family:'Archivo',sans-serif;font-size:14px;font-weight:600;margin-bottom:3px}
+.drop p{font-size:11.5px;color:var(--muted)}
+.drop .pill{display:inline-block;margin-top:9px;padding:5px 12px;border:1px solid var(--ink);
+  border-radius:var(--radius);font-size:11.5px;font-weight:500}
+
+.ingest{display:flex;align-items:center;gap:12px;padding:10px 12px;border-bottom:1px solid var(--line-2)}
+.ingest:last-child{border-bottom:none}
+.ingest .nm{font-size:12.5px;font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prog{width:150px;height:4px;background:var(--line);border-radius:2px;overflow:hidden;flex:none}
+.prog i{display:block;height:100%;background:var(--teal);transition:width .3s}
+.stage-lbl{font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--muted);width:88px;flex:none;text-align:right}
+
+/* ---------- brand assets ---------- */
+.assets{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px}
+.ass{border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--surface);
+  text-align:left;transition:border-color .12s}
+.ass:hover{border-color:var(--ink)}
+.ass .sq{aspect-ratio:1;display:flex;align-items:center;justify-content:center;position:relative}
+.ass .sq span{font-family:'JetBrains Mono',monospace;font-size:9px;color:rgba(255,255,255,.75);
+  position:absolute;bottom:5px;right:6px}
+.ass .nm{padding:8px 9px;font-size:11.5px;font-weight:500}
+.ass .kd{padding:0 9px 8px;font-size:10.5px;color:var(--muted)}
+
+/* ---------- scene rail ---------- */
+.rail-wrap{position:relative}
+.rail-scenes{display:flex;gap:6px;margin-top:12px;overflow-x:auto;padding-bottom:4px;align-items:flex-start}
+.scn{
+  flex:none;width:112px;border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--surface);overflow:hidden;text-align:left;transition:border-color .12s,opacity .12s;
+  position:relative;cursor:grab;
+}
+.scn:hover{border-color:var(--muted)}
+.scn[data-on="1"]{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
+.scn.dragging{opacity:.35;cursor:grabbing}
+.scn.over-l{box-shadow:-3px 0 0 var(--signal)}
+.scn.over-r{box-shadow:3px 0 0 var(--signal)}
+.scn .pv{aspect-ratio:9/16;height:76px;width:100%;position:relative;overflow:hidden;display:block}
+.scn .lb{padding:5px 7px;font-size:10px;color:var(--muted);display:flex;justify-content:space-between;gap:4px}
+.scn .lb b{font-family:'JetBrains Mono',monospace;font-weight:500;color:var(--ink);font-size:9.5px}
+.scn .ops{
+  position:absolute;top:4px;right:4px;display:none;gap:2px;
+}
+.scn:hover .ops,.scn[data-on="1"] .ops{display:flex}
+.scn .op{
+  width:17px;height:17px;border-radius:2px;background:rgba(255,255,255,.92);
+  border:1px solid var(--line);font-size:10px;line-height:1;color:var(--ink);
+  display:flex;align-items:center;justify-content:center;padding:0;
+}
+.scn .op:hover{background:var(--ink);color:#fff;border-color:var(--ink)}
+.scn .hnd-grip{
+  position:absolute;top:4px;left:4px;width:14px;height:17px;display:flex;
+  align-items:center;justify-content:center;color:rgba(255,255,255,.7);font-size:11px;
+  letter-spacing:-1px;pointer-events:none;
+}
+.scn-add{
+  flex:none;width:44px;height:76px;border:1px dashed var(--line);border-radius:var(--radius);
+  display:flex;align-items:center;justify-content:center;font-size:18px;color:var(--faint);
+  background:var(--surface);
+}
+.scn-add:hover{border-color:var(--ink);color:var(--ink)}
+
+.addmenu{
+  position:absolute;z-index:40;background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--radius);box-shadow:0 8px 24px rgba(0,0,0,.13);padding:5px;
+  min-width:186px;display:none;
+}
+.addmenu.on{display:block}
+.addmenu .grp{
+  padding:7px 9px 4px;font-family:'JetBrains Mono',monospace;font-size:9px;
+  letter-spacing:.11em;text-transform:uppercase;color:var(--faint);
+}
+.addmenu button{
+  display:flex;align-items:center;gap:9px;width:100%;text-align:left;
+  padding:6px 9px;border-radius:2px;font-size:12px;
+}
+.addmenu button:hover{background:var(--paper)}
+.addmenu .mi{width:13px;height:23px;border-radius:1px;overflow:hidden;display:flex;
+  flex-direction:column;gap:1px;flex:none}
+.addmenu .mi i{flex:1;background:#8E99AB}
+.addmenu .mi i.ast{background:#C8A2AE}
+.addmenu .mi i.crd{background:var(--signal)}
+.addmenu .sep{height:1px;background:var(--line-2);margin:4px 0}
+.addmenu .sub{font-size:10.5px;color:var(--faint);margin-left:auto}
+
+.pv-half{position:absolute;left:0;right:0}
+.pv-vid{background:linear-gradient(135deg,#2B3140,#5A6478)}
+.pv-ast{background:linear-gradient(150deg,#C8A2AE,#E4CBD2);display:flex;align-items:center;justify-content:center}
+.pv-ast::after{content:"";width:34%;height:34%;border-radius:50%;background:rgba(255,255,255,.55)}
+.pv-card{position:absolute;inset:0;background:var(--ink);display:flex;align-items:center;justify-content:center}
+.pv-card::after{content:"";width:44%;height:5px;background:var(--signal);border-radius:2px}
+
+.layouts{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:12px}
+.ly{border:1px solid var(--line);border-radius:var(--radius);padding:6px 4px;background:var(--surface);
+  display:flex;flex-direction:column;align-items:center;gap:5px;font-size:9.5px;color:var(--muted)}
+.ly:hover{border-color:var(--ink)}
+.ly[data-on="1"]{border-color:var(--ink);background:var(--ink);color:#fff}
+.ly .gl{width:17px;height:30px;border-radius:1px;overflow:hidden;display:flex;flex-direction:column;gap:1px}
+.ly .gl i{flex:1;background:#8E99AB;display:block}
+.ly .gl i.ast{background:#C8A2AE}
+.ly .gl i.crd{background:var(--signal)}
+.ly[data-on="1"] .gl i{opacity:.9}
+
+/* ---------- variants ---------- */
+.vars{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:14px}
+.var{
+  display:flex;align-items:center;gap:7px;padding:5px 10px;border:1px solid var(--line);
+  border-radius:14px;background:var(--surface);font-size:11.5px;
+}
+.var:hover{border-color:var(--muted)}
+.var[data-on="1"]{background:var(--ink);border-color:var(--ink);color:#fff}
+.var .mk{
+  font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;
+  width:15px;height:15px;border-radius:50%;background:var(--paper);color:var(--ink);
+  display:flex;align-items:center;justify-content:center;flex:none;
+}
+.var[data-on="1"] .mk{background:var(--signal)}
+.var .x{opacity:.5;font-size:12px;line-height:1}
+.var .x:hover{opacity:1}
+.var-add{padding:5px 11px;border:1px dashed var(--line);border-radius:14px;
+  background:var(--surface);font-size:11.5px;color:var(--muted)}
+.var-add:hover{border-color:var(--ink);color:var(--ink)}
+
+.var .nm{max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.var .ct{opacity:.55;font-size:10.5px}
+
+.namer{
+  position:absolute;z-index:50;background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--radius);box-shadow:0 8px 24px rgba(0,0,0,.14);padding:12px;
+  width:250px;display:none;
+}
+.namer.on{display:block}
+.namer .lb{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--faint);margin-bottom:6px}
+.namer input{width:100%;margin-bottom:8px}
+.namer .sugs{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px}
+.namer .sug{padding:3px 8px;border:1px solid var(--line);border-radius:11px;
+  font-size:10.5px;color:var(--muted);background:var(--surface)}
+.namer .sug:hover{border-color:var(--ink);color:var(--ink)}
+.namer .acts{display:flex;gap:6px;justify-content:flex-end}
+
+/* ---------- preview ---------- */
+.prev{display:grid;grid-template-columns:1fr 320px;gap:18px;align-items:start}
+@media(max-width:900px){.prev{grid-template-columns:1fr}}
+.prev-stage{background:var(--ink);border-radius:var(--radius);padding:24px;
+  display:flex;justify-content:center}
+.vframe{
+  position:relative;width:270px;aspect-ratio:9/16;border-radius:3px;overflow:hidden;
+  background:#11131A;
+}
+.vf-top,.vf-bot{position:absolute;left:0;right:0}
+.vf-top{background:linear-gradient(135deg,#2B3140,#5A6478);top:0}
+.vf-bot{display:none;align-items:center;justify-content:center}
+.vf-bot::after{content:"";width:38%;aspect-ratio:1;border-radius:50%;background:rgba(255,255,255,.5)}
+.vf-card{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:#1B1D22}
+.vf-card::after{content:"";width:46%;height:5px;background:var(--signal);border-radius:2px}
+.vf-fig{position:absolute;left:50%;top:26%;transform:translate(-50%,-50%);
+  width:52px;height:52px;border-radius:50%;background:rgba(255,255,255,.24)}
+
+.ticks{display:flex;gap:3px;margin-top:12px}
+.tick{height:5px;border-radius:2px;background:var(--line);overflow:hidden}
+.tick i{display:block;height:100%;width:0;background:var(--ink)}
+.tick[data-on="1"]{background:#D8D5CD}
+
+.chk{display:flex;gap:9px;padding:9px 0;border-bottom:1px solid var(--line-2);font-size:12px}
+.chk:last-child{border-bottom:none}
+.chk .dotc{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--line);flex:none;margin-top:2px}
+.chk[data-s="ok"] .dotc{background:var(--teal);border-color:var(--teal)}
+.chk[data-s="warn"] .dotc{background:var(--signal);border-color:var(--signal-deep)}
+.chk p{color:var(--muted);font-size:11px;margin-top:1px}
+
+/* ---------- safe zones ---------- */
+.zone{position:absolute;left:0;right:0;pointer-events:none;z-index:6;display:none}
+.crop.zones .zone.r{display:none}
+.vframe.zones .zone,.crop.zones .zone{display:block}
+.zone.t{top:0;height:14%;background:rgba(196,67,110,.30);border-bottom:1px dashed rgba(255,120,155,.9)}
+.zone.b{bottom:0;height:16%;background:rgba(196,67,110,.30);border-top:1px dashed rgba(255,120,155,.9)}
+.zone.r{top:0;bottom:0;left:auto;right:0;width:12%;background:rgba(196,67,110,.22);
+  border-left:1px dashed rgba(255,120,155,.75)}
+.zone span{
+  position:absolute;left:6px;font-family:'JetBrains Mono',monospace;font-size:8.5px;
+  font-weight:700;color:#fff;letter-spacing:.04em;text-shadow:0 1px 2px rgba(0,0,0,.6);
+}
+.zone.t span{top:5px} .zone.b span{bottom:5px} .zone.r span{top:5px;left:5px;writing-mode:vertical-rl}
+
+.prev-tools{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:12px}
+.seg{display:flex;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.seg button{padding:5px 11px;font-size:11.5px;background:var(--surface);color:var(--muted);
+  border-right:1px solid var(--line)}
+.seg button:last-child{border-right:none}
+.seg button[data-on="1"]{background:var(--ink);color:#fff}
+.zone-tog{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);cursor:pointer}
+
+.vframe.r45{aspect-ratio:4/5;width:300px}
+.vframe.r11{aspect-ratio:1;width:330px}
+.vframe.r1911{aspect-ratio:1.91;width:430px}
+
+/* ---------- asset import strip ---------- */
+.imp{display:flex;gap:7px;overflow-x:auto;padding:2px 0 4px;margin-top:8px}
+.imp .it{flex:none;width:60px;border:1px solid var(--line);border-radius:var(--radius);
+  overflow:hidden;background:var(--surface);text-align:left}
+.imp .it:hover{border-color:var(--ink)}
+.imp .it .sq{aspect-ratio:1;display:block}
+.imp .it .nm{padding:3px 5px;font-size:9px;color:var(--muted);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.imp .it-up{flex:none;width:60px;border:1px dashed var(--line);border-radius:var(--radius);
+  background:var(--surface);display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:2px;color:var(--faint);font-size:9.5px;min-height:76px}
+.imp .it-up:hover{border-color:var(--ink);color:var(--ink)}
+.imp .it-up b{font-size:15px;font-weight:400;line-height:1}
+
+.pushrow{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--line-2)}
+.pushrow:last-child{border-bottom:none}
+.pushrow .th{width:34px;aspect-ratio:9/16;border-radius:2px;flex:none;
+  background:linear-gradient(150deg,#3A4252,#7E8A9C);position:relative;overflow:hidden}
+.pushrow .th b{position:absolute;left:0;right:0;bottom:0;height:34%;background:#C8A2AE}
+.pushrow .th u{position:absolute;inset:0;background:#1B1D22;display:none}
+.pushrow[data-s="failed"] .th,.pushrow[data-s="rejected"] .th{opacity:.4}
+.pushrow .meta{flex:1;min-width:0}
+.pushrow .nm{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pushrow .sp{font-size:10.5px;color:var(--muted);margin-top:2px}
+.pushrow .why{font-size:10.5px;margin-top:4px;padding:5px 7px;border-radius:2px;line-height:1.4}
+.pushrow[data-s="failed"] .why{background:#FFF6DC;border:1px solid #F0DCA0;color:#7A5A00}
+.pushrow[data-s="rejected"] .why{background:#FDF0F4;border:1px solid #F0CEDA;color:#9A2F53}
+.pushrow .st{flex:none;align-self:flex-start;display:flex;flex-direction:column;gap:5px;align-items:flex-end}
+.status.fail{background:#FFF6DC;color:#7A5A00;border:1px solid #F0DCA0}
+.status.rej{background:#FDF0F4;color:#9A2F53;border:1px solid #F0CEDA}
+
+.batch{
+  display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+  padding-bottom:10px;margin-bottom:4px;border-bottom:1px solid var(--line);flex-wrap:wrap;
+}
+.batch .cnt{font-size:12.5px;font-weight:600}
+.batch .cnt em{font-style:normal;color:var(--muted);font-weight:400}
+
+/* ---------- collapsible sidebar sections ---------- */
+.acc{border-bottom:1px solid var(--line-2)}
+.acc:last-of-type{border-bottom:none}
+.acc-h{
+  display:flex;align-items:center;gap:8px;width:100%;text-align:left;
+  padding:10px 0;font-family:'JetBrains Mono',monospace;font-size:9.5px;
+  letter-spacing:.11em;text-transform:uppercase;color:var(--muted);font-weight:500;
+}
+.acc-h:hover{color:var(--ink)}
+.acc-h .cv{
+  margin-left:auto;width:9px;height:9px;flex:none;
+  border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;
+  transform:rotate(-45deg) translate(-1px,-1px);transition:transform .16s;
+}
+.acc[data-open="1"] .acc-h .cv{transform:rotate(45deg) translate(-2px,-2px)}
+.acc[data-open="1"] .acc-h{color:var(--ink)}
+.acc-h .sum{
+  font-family:'Inter',sans-serif;font-size:10.5px;letter-spacing:0;
+  text-transform:none;color:var(--faint);font-weight:400;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:110px;
+}
+.acc-b{display:none;padding:2px 0 12px}
+.acc[data-open="1"] .acc-b{display:block}
+
+/* ---------- review queue ---------- */
+.qtabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:0}
+.qtab{
+  padding:8px 14px;font-size:12.5px;color:var(--muted);border-bottom:2px solid transparent;
+  margin-bottom:-1px;display:flex;align-items:center;gap:7px;
+}
+.qtab:hover{color:var(--ink)}
+.qtab[data-on="1"]{color:var(--ink);font-weight:600;border-bottom-color:var(--signal)}
+.qtab .n{
+  font-family:'JetBrains Mono',monospace;font-size:10px;padding:1px 6px;border-radius:9px;
+  background:var(--paper);border:1px solid var(--line);color:var(--muted);
+}
+.qtab[data-on="1"] .n{background:var(--ink);border-color:var(--ink);color:#fff}
+
+.bulk{
+  display:none;align-items:center;gap:10px;padding:9px 14px;background:var(--ink);color:#fff;
+  border-radius:var(--radius);margin:12px 0;flex-wrap:wrap;
+}
+.bulk.on{display:flex}
+.bulk .cnt{font-size:12.5px;font-weight:600}
+.bulk .sp{flex:1}
+.bulk button{padding:5px 11px;border-radius:var(--radius);font-size:11.5px;
+  border:1px solid rgba(255,255,255,.3);color:#fff}
+.bulk button:hover{background:rgba(255,255,255,.12)}
+.bulk button.go{background:var(--signal);border-color:var(--signal);color:var(--ink);font-weight:600}
+.bulk button.go:hover{filter:brightness(.94);background:var(--signal)}
+
+table.q{width:100%;border-collapse:collapse;font-size:12px;background:var(--surface)}
+table.q th{
+  text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);
+  font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--faint);font-weight:500;white-space:nowrap;
+}
+table.q td{padding:9px 10px;border-bottom:1px solid var(--line-2);vertical-align:middle}
+table.q tr:last-child td{border-bottom:none}
+table.q tr.sel td{background:#FFFBF0}
+table.q tr:hover td{background:var(--paper)}
+table.q tr.sel:hover td{background:#FFF6DC}
+table.q .cb{width:30px}
+table.q .qth{width:26px;aspect-ratio:9/16;border-radius:2px;
+  background:linear-gradient(150deg,#3A4252,#7E8A9C);position:relative;overflow:hidden;display:block}
+table.q .qth b{position:absolute;left:0;right:0;bottom:0;height:34%;background:#C8A2AE}
+table.q .nm{font-family:'JetBrains Mono',monospace;font-size:10.5px;font-weight:500}
+table.q .sub{font-size:10.5px;color:var(--muted);margin-top:1px}
+table.q .num{font-family:'JetBrains Mono',monospace;text-align:right;font-variant-numeric:tabular-nums}
+.qempty{padding:34px 14px;text-align:center;color:var(--muted);font-size:12.5px;background:var(--surface)}
+
+/* ---------- push ---------- */
+.push{display:grid;grid-template-columns:260px 1fr;gap:18px;align-items:start}
+@media(max-width:860px){.push{grid-template-columns:1fr}}
+.vert{width:180px;aspect-ratio:9/16;border-radius:2px;overflow:hidden;position:relative;
+  background:linear-gradient(150deg,#3A4252 0%,#5C6779 60%,#7E8A9C 100%);margin:0 auto}
+.vert .fig{width:52px;height:52px;position:absolute;top:34%;left:50%;transform:translate(-50%,-50%)}
+
+.steps{display:flex;flex-direction:column;gap:0}
+.step{display:grid;grid-template-columns:22px 1fr;gap:11px;padding:11px 0;
+  border-bottom:1px solid var(--line-2)}
+.step:last-child{border-bottom:none}
+.pip{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--line);margin-top:2px}
+.step[data-s="done"] .pip{background:var(--teal);border-color:var(--teal)}
+.step[data-s="live"] .pip{background:var(--signal);border-color:var(--signal-deep);
+  animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+.step h4{font-size:12.5px;font-weight:600;margin-bottom:1px}
+.step p{font-size:11.5px;color:var(--muted)}
+
+.kv{display:grid;grid-template-columns:120px 1fr;gap:6px 14px;font-size:12px}
+.kv dt{color:var(--muted)}
+.kv dd{font-weight:500}
+
+.status{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:2px;
+  font-size:11px;font-weight:600;font-family:'JetBrains Mono',monospace}
+.status.paused{background:#FFF6DC;color:#7A5A00;border:1px solid #F0DCA0}
+.status.rev{background:#EAF2F1;color:var(--teal);border:1px solid #C4DAD8}
+
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+@media(max-width:820px){
+  .app{grid-template-columns:1fr}
+  .rail{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 16px}
+  .brand{border:none;padding:0;margin:0}
+  .brand-sub,.rail-foot,.nav-label{display:none}
+  .nav{flex-direction:row;flex-wrap:wrap;padding:0}
+  .screen,.topbar{padding-left:16px;padding-right:16px}
+}
+</style>
+
+<div class="app">
+  <aside class="rail">
+    <div class="brand">
+      <div class="brand-mark"><span class="dot"></span>Creative Builder</div>
+      <div class="brand-sub">Klira · Hello Yellow</div>
+    </div>
+    <nav class="nav" id="nav">
+      <div class="nav-label">Workflow</div>
+      <button class="nav-item" data-go="library" aria-current="true"><span class="idx">01</span>Library</button>
+      <button class="nav-item" data-go="analyse"><span class="idx">02</span>Transcript</button>
+      <button class="nav-item" data-go="recs"><span class="idx">03</span>Suggested cuts</button>
+      <button class="nav-item" data-go="build"><span class="idx">04</span>Clip builder</button>
+      <button class="nav-item" data-go="preview"><span class="idx">05</span>Preview</button>
+      <button class="nav-item" data-go="queue"><span class="idx">06</span>Review queue</button>
+      <button class="nav-item" data-go="push"><span class="idx">07</span>Send to Meta</button>
+      <div class="nav-label">Setup</div>
+      <button class="nav-item" data-go="assets"><span class="idx">—</span>Brand assets</button>
+      <button class="nav-item" data-go="styles"><span class="idx">—</span>Subtitle styles</button>
+    </nav>
+    <div class="rail-foot"><p>Ads land paused. Nothing publishes without review.</p></div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div>
+        <h1 id="ttl">Library</h1>
+        <div class="sub" id="sub">Long-form source material and the ad back catalogue</div>
+      </div>
+      <div class="row" id="acts"></div>
+    </header>
+
+    <!-- 01 LIBRARY -->
+    <section class="screen on" id="s-library">
+      <div class="row" style="gap:14px;margin-bottom:22px;align-items:stretch;flex-wrap:wrap">
+        <div class="drop" id="dropLong" style="flex:1;min-width:250px">
+          <h3>Upload long-form</h3>
+          <p>Podcast episodes, Instagram Lives. MP4, MOV, up to 8 GB.</p>
+          <span class="pill">Choose file</span>
+        </div>
+        <div class="drop" id="dropAd" style="flex:1;min-width:250px">
+          <h3>Upload ad creative</h3>
+          <p>Creative that never ran on Meta — adds to the learning corpus.</p>
+          <span class="pill">Choose file</span>
+        </div>
+      </div>
+
+      <h2 class="sec">Processing</h2>
+      <div class="card" style="margin-bottom:26px" id="ingestList"></div>
+
+      <h2 class="sec">Long-form source</h2>
+      <div class="grid-assets" style="margin-bottom:26px">
+        <button class="card asset" data-open="1">
+          <div class="thumb"><div class="head"></div><div class="head b"></div>
+            <span class="badge">6 cuts found</span><span class="dur mono">47:12</span></div>
+          <div class="asset-meta">
+            <h3>Barrier repair, with Dr Emma Craythorne</h3>
+            <div class="m">Podcast · 2 speakers · processed 2 Aug</div>
+          </div>
+        </button>
+        <button class="card asset">
+          <div class="thumb"><div class="head"></div>
+            <span class="badge">4 cuts found</span><span class="dur mono">28:40</span></div>
+          <div class="asset-meta">
+            <h3>Live Q&amp;A — tretinoin purging</h3>
+            <div class="m">Instagram Live · 1 speaker · processed 29 Jul</div>
+          </div>
+        </button>
+        <button class="card asset">
+          <div class="thumb" style="background:linear-gradient(135deg,#40323E,#6B5560,#8E7580)">
+            <div class="head"></div><div class="head b"></div>
+            <span class="dur mono">52:05</span></div>
+          <div class="asset-meta">
+            <h3>Routine building for rosacea</h3>
+            <div class="m">Podcast · transcribing — 68%</div>
+          </div>
+        </button>
+      </div>
+
+      <h2 class="sec">Ad back catalogue</h2>
+      <div class="card" style="overflow:hidden">
+        <table class="ads">
+          <thead><tr>
+            <th>Creative</th><th>Hook</th><th>Tags</th>
+            <th style="text-align:right">Spend</th><th style="text-align:right">Thumbstop</th>
+            <th style="text-align:right">Hold</th><th style="text-align:right">ROAS</th>
+          </tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>KLR_UGC_barrier_04</strong><div class="m" style="color:var(--muted);font-size:11px">3 ads · 62 days</div></td>
+              <td>Direct question</td>
+              <td><span class="tag">texture shot</span> <span class="tag">barrier</span></td>
+              <td class="num">£14,208</td>
+              <td class="num">31.4%<div class="bar"><i style="width:88%"></i></div></td>
+              <td class="num">42.0%</td><td class="num">3.11</td>
+            </tr>
+            <tr>
+              <td><strong>KLR_TALENT_derm_11</strong><div class="m" style="color:var(--muted);font-size:11px">2 ads · 44 days</div></td>
+              <td>Credential open</td>
+              <td><span class="tag">expert</span> <span class="tag flag">claim: treatment</span></td>
+              <td class="num">£9,760</td>
+              <td class="num">28.9%<div class="bar"><i style="width:79%"></i></div></td>
+              <td class="num">39.5%</td><td class="num">2.84</td>
+            </tr>
+            <tr>
+              <td><strong>KLR_UGC_routine_02</strong><div class="m" style="color:var(--muted);font-size:11px">5 ads · 90 days</div></td>
+              <td>Routine reveal</td>
+              <td><span class="tag">before/after</span> <span class="tag">acne</span></td>
+              <td class="num">£22,940</td>
+              <td class="num">24.1%<div class="bar"><i style="width:63%"></i></div></td>
+              <td class="num">33.8%</td><td class="num">2.40</td>
+            </tr>
+            <tr>
+              <td><strong>KLR_STUDIO_ingred_07</strong><div class="m" style="color:var(--muted);font-size:11px">1 ad · 21 days</div></td>
+              <td>Product first</td>
+              <td><span class="tag">ingredient</span></td>
+              <td class="num">£3,115</td>
+              <td class="num">17.6%<div class="bar"><i style="width:41%"></i></div></td>
+              <td class="num">26.2%</td><td class="num">1.32</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="margin-top:10px;font-size:11.5px;color:var(--muted)">
+        Rates computed at video level from raw counts. 412 creatives ingested · 78 with spend above £500.
+      </p>
+    </section>
+
+    <!-- 02 ANALYSE -->
+    <section class="screen" id="s-analyse">
+      <div class="stack">
+        <div class="tl-wrap">
+          <div class="tl-head">
+            <div>
+              <div class="eyebrow">Timeline</div>
+              <div style="font-weight:600;font-size:14px;margin-top:2px">Barrier repair, with Dr Emma Craythorne</div>
+            </div>
+            <div class="mono" style="font-size:11.5px;color:var(--muted)">47:12 · 214 scenes · 2 speakers</div>
+          </div>
+          <div class="ruler" id="ruler"></div>
+          <div class="tl" id="tl">
+            <div class="lane-tag">Scenes</div>
+            <div class="lane" style="--h:16px" id="lane-scene"></div>
+            <div class="lane-tag">Speakers</div>
+            <div class="lane" style="--h:22px" id="lane-spk"></div>
+            <div class="lane-tag">Suggested cuts</div>
+            <div class="lane" style="--h:30px;overflow:visible" id="lane-rec"></div>
+            <div class="playhead" id="ph" style="left:0"></div>
+          </div>
+          <div style="display:flex;gap:16px;margin-top:10px;font-size:11px;color:var(--muted);flex-wrap:wrap">
+            <span><span style="display:inline-block;width:9px;height:9px;background:#25627F;border-radius:2px;vertical-align:middle"></span> Dr Emma Craythorne</span>
+            <span><span style="display:inline-block;width:9px;height:9px;background:#8FA6B4;border-radius:2px;vertical-align:middle"></span> Chloe (host)</span>
+            <span><span style="display:inline-block;width:9px;height:9px;background:var(--signal);border-radius:2px;vertical-align:middle"></span> Machine-suggested segment</span>
+          </div>
+        </div>
+
+        <div>
+          <h2 class="sec">Transcript</h2>
+          <div class="tx" id="tx"></div>
+          <p style="margin-top:8px;font-size:11.5px;color:var(--muted)">
+            Word-level timing from WhisperX. Click any line to move the playhead. Highlighted lines fall inside a suggested cut.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 03 RECS -->
+    <section class="screen" id="s-recs">
+      <div class="stack">
+        <div class="note">
+          <strong>These are prompts, not verdicts.</strong> Scored against 78 Klira creatives with meaningful spend — enough to spot patterns, not enough to prove causation. Sample size is shown on every card. Check the evidence before you trust the ranking.
+        </div>
+        <div class="recs" id="recs"></div>
+      </div>
+    </section>
+
+    <!-- 04 BUILD -->
+    <section class="screen" id="s-build">
+      <div class="build">
+        <div>
+          <div class="prev-tools" style="margin:0 0 10px">
+            <div class="seg" id="bRatioSeg">
+              <button data-br="9x16" data-on="1">9:16</button>
+              <button data-br="4x5">4:5</button>
+              <button data-br="1x1">1:1</button>
+              <button data-br="1.91x1">1.91:1</button>
+            </div>
+            <label class="zone-tog"><input type="checkbox" id="bZoneTog"> Safe zones</label>
+            <span class="mono" style="font-size:10.5px;color:var(--faint)" id="bRatioNote">Reels, Stories · 1080×1920</span>
+          </div>
+          <div class="stage">
+            <div class="src" id="src">
+              <div class="figs"><div class="fig"></div><div class="fig b"></div></div>
+              <div class="cap" id="cap"></div>
+              <div class="crop" id="crop" style="left:35.9%">
+                <div class="lay-lower" id="layLower"></div>
+                <div class="lay-card" id="layCard"></div>
+                <div class="grid">
+                  <i class="v" style="left:33.33%"></i><i class="v" style="left:66.66%"></i>
+                  <i class="h" style="top:33.33%"></i><i class="h" style="top:66.66%"></i>
+                </div>
+                <b class="br tl"></b><b class="br tr"></b><b class="br bl"></b><b class="br br2"></b>
+                <div class="zone t"><span>TOP</span></div>
+                <div class="zone b"><span>BOTTOM</span></div>
+                <div class="crop-hint">drag to reframe · <span id="cropRatio">9:16</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="strip" id="strip">
+            <div class="frames" id="frames"></div>
+            <div class="mask" id="maskL" style="left:0;width:0"></div>
+            <div class="mask" id="maskR" style="right:0;width:0"></div>
+            <div class="win" id="win">
+              <div class="hnd l" id="hL" role="slider" aria-label="Clip start"></div>
+              <div class="hnd r" id="hR" role="slider" aria-label="Clip end"></div>
+            </div>
+            <div class="strip-ph" id="stripPh" style="left:0"></div>
+          </div>
+          <div class="strip-scale"><span id="ctx0">00:00</span><span id="ctx1">00:00</span></div>
+
+          <div style="display:flex;align-items:baseline;justify-content:space-between;margin-top:16px">
+            <div class="eyebrow">Variants</div>
+            <span class="mono" style="font-size:10.5px;color:var(--faint)" id="varHint">Same body, different hooks</span>
+          </div>
+          <div class="rail-wrap">
+            <div class="vars" id="varRail"></div>
+            <div class="namer" id="namer">
+              <div class="lb" id="namerLb">Name this variant</div>
+              <input type="text" id="varName" placeholder="e.g. Emotional hook" autocomplete="off">
+              <div class="sugs" id="varSugs"></div>
+              <div class="acts">
+                <button class="btn ghost sm" id="varCancel">Cancel</button>
+                <button class="btn sm" id="varOk">Add</button>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;align-items:baseline;justify-content:space-between;margin-top:16px">
+            <div class="eyebrow">Scenes — drag to reorder</div>
+            <button class="btn ghost sm" id="splitBtn">Split at playhead</button>
+          </div>
+          <div class="rail-wrap">
+            <div class="rail-scenes" id="sceneRail"></div>
+            <div class="addmenu" id="addMenu">
+              <div class="grp">Add scene</div>
+              <button data-add="full"><span class="mi"><i></i></span>Full frame</button>
+              <button data-add="split_product"><span class="mi"><i></i><i class="ast"></i></span>Product split</button>
+              <button data-add="split_speakers"><span class="mi"><i></i><i></i></span>Speakers split</button>
+              <button data-add="card"><span class="mi"><i class="crd"></i></span>End card</button>
+              <div class="sep"></div>
+              <div class="grp">Apply template</div>
+              <button data-tplm="plain">Plain<span class="sub">1 scene</span></button>
+              <button data-tplm="product">Product split<span class="sub">2 scenes</span></button>
+              <button data-tplm="hookfirst">Hook first + card<span class="sub">3 scenes</span></button>
+            </div>
+          </div>
+
+          <div class="transport">
+            <button class="tbtn pri" id="playBtn" aria-label="Play" title="Play (space)">
+              <svg viewBox="0 0 12 12" id="playIcon"><path d="M2 1l9 5-9 5z"/></svg>
+            </button>
+            <button class="tbtn" id="stopBtn" aria-label="Stop" title="Stop">
+              <svg viewBox="0 0 12 12"><rect x="2" y="2" width="8" height="8"/></svg>
+            </button>
+            <span class="tc mono"><b id="tcNow">00:00.0</b> / <span id="tcEnd">27.6</span></span>
+            <input type="range" id="scrub" min="0" max="1000" value="0" step="1" aria-label="Scrub">
+            <div class="speeds" id="speeds">
+              <button class="spd" data-r="0.25">0.25×</button>
+              <button class="spd" data-r="0.5">0.5×</button>
+              <button class="spd" data-r="1" data-on="1">1×</button>
+              <button class="spd" data-r="1.5">1.5×</button>
+              <button class="spd" data-r="2">2×</button>
+            </div>
+          </div>
+
+          <div class="trim">
+            <div class="fld">In <input type="text" class="mono" id="tin" value="00:12:04.320" readonly></div>
+            <div class="fld">Out <input type="text" class="mono" id="tout" value="00:12:31.880" readonly></div>
+            <div class="fld mono" style="color:var(--ink)" id="tdur">27.6s</div>
+            <div class="fld" style="margin-left:auto" id="cropv">Centred on Dr Craythorne</div>
+          </div>
+          <div class="note" style="margin-top:10px">
+            Landscape source, vertical output. Drag the frame to reframe and the yellow handles to trim — both save with the clip, so re-exports keep them.
+          </div>
+        </div>
+
+        <div class="card pad">
+          <div class="acc" data-acc="tpl" data-open="1">
+            <button class="acc-h">Template <span class="sum" id="sumTpl"></span><span class="cv"></span></button>
+            <div class="acc-b">
+              <div class="presets" id="templates" style="margin-bottom:2px">
+                <button class="chip" data-tpl="plain" data-on="1">Plain</button>
+                <button class="chip" data-tpl="product">Product split</button>
+                <button class="chip" data-tpl="hookfirst">Hook first + card</button>
+                <span class="chip" id="tplCustom" style="display:none;cursor:default">Custom</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="acc" data-acc="assets" data-open="1">
+            <button class="acc-h">Assets <span class="sum" id="sumAsset"></span><span class="cv"></span></button>
+            <div class="acc-b">
+              <div class="imp" id="impStrip"></div>
+              <p style="font-size:10.5px;color:var(--muted);margin:4px 0 0">
+                Click to drop into the selected scene. Uploads land in the brand library too.
+              </p>
+            </div>
+          </div>
+
+          <div class="acc" data-acc="layout" data-open="1">
+            <button class="acc-h">Scene layout <span class="sum" id="sumLayout"></span><span class="cv"></span></button>
+            <div class="acc-b">
+              <div class="layouts" id="layouts">
+                <button class="ly" data-ly="full" data-on="1">
+                  <span class="gl"><i></i></span>full</button>
+                <button class="ly" data-ly="split_product">
+                  <span class="gl"><i></i><i class="ast"></i></span>product</button>
+                <button class="ly" data-ly="split_speakers">
+                  <span class="gl"><i></i><i></i></span>speakers</button>
+                <button class="ly" data-ly="card">
+                  <span class="gl"><i class="crd"></i></span>card</button>
+              </div>
+
+              <div class="ctrl" id="slotWrap" style="display:none">
+                <label for="slot">Lower slot</label>
+                <select id="slot"></select>
+              </div>
+              <div class="ctrl" id="ratioWrap" style="display:none">
+                <label>Split ratio</label>
+                <div class="presets" style="margin:0">
+                  <button class="chip" data-ratio="0.5" data-on="1">50 / 50</button>
+                  <button class="chip" data-ratio="0.6">60 / 40</button>
+                </div>
+              </div>
+              <label class="toggle" id="liftWrap" style="display:none">
+                <input type="checkbox" id="lift" checked> Lift from original position
+              </label>
+            </div>
+          </div>
+
+          <div class="acc" data-acc="subs" data-open="0">
+            <button class="acc-h">Subtitles <span class="sum" id="sumSubs"></span><span class="cv"></span></button>
+            <div class="acc-b">
+              <div class="presets" id="presets">
+                <button class="chip" data-p="klira" data-on="1">Klira default</button>
+                <button class="chip" data-p="bold">Bold pop</button>
+                <button class="chip" data-p="clean">Clean caption</button>
+              </div>
+
+              <div class="ctrl">
+                <label for="fs">Size <b id="fsv">30px</b></label>
+                <input type="range" id="fs" min="16" max="46" value="30">
+              </div>
+              <div class="ctrl">
+                <label for="ol">Outline <b id="olv">3px</b></label>
+                <input type="range" id="ol" min="0" max="8" value="3">
+              </div>
+              <div class="ctrl">
+                <label for="vp">Vertical position <b id="vpv">72%</b></label>
+                <input type="range" id="vp" min="35" max="88" value="72">
+              </div>
+              <div class="ctrl">
+                <label for="wpl">Words per line <b id="wplv">4</b></label>
+                <input type="range" id="wpl" min="2" max="8" value="4">
+              </div>
+
+              <div class="ctrl">
+                <label>Active word</label>
+                <div class="swatches" id="hl">
+                  <button class="sw" style="background:#FFC629" data-c="#FFC629" data-on="1"></button>
+                  <button class="sw" style="background:#4ED6A1" data-c="#4ED6A1"></button>
+                  <button class="sw" style="background:#FF6B8A" data-c="#FF6B8A"></button>
+                  <button class="sw" style="background:#FFFFFF" data-c="#FFFFFF"></button>
+                </div>
+              </div>
+
+              <label class="toggle"><input type="checkbox" id="caps"> All caps</label>
+              <label class="toggle"><input type="checkbox" id="box"> Background box</label>
+            </div>
+          </div>
+
+          <div class="acc" data-acc="fix" data-open="0">
+            <button class="acc-h">Transcript fix<span class="cv"></span></button>
+            <div class="acc-b">
+              <input type="text" id="fixw" value="Klira" aria-label="Correct a mistranscribed word">
+              <p style="font-size:11px;color:var(--muted);margin-top:5px">
+                Corrections apply to this clip only. The source transcript is untouched.
+              </p>
+            </div>
+          </div>
+
+          <button class="btn signal" style="width:100%;margin-top:14px" data-go="preview">Preview all variants</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 05 PREVIEW -->
+    <section class="screen" id="s-preview">
+      <div class="prev">
+        <div>
+          <div class="prev-stage">
+            <div class="vframe zones" id="vframe">
+              <div class="vf-top" id="vfTop"><span class="vf-fig"></span></div>
+              <div class="vf-bot" id="vfBot"></div>
+              <div class="vf-card" id="vfCard"></div>
+              <div class="cap" id="cap3"></div>
+              <div class="zone t"><span id="zTop">TOP 14% — PROFILE, USERNAME, AD LABEL</span></div>
+              <div class="zone b"><span id="zBot">BOTTOM 16% — CAPTION, CTA BUTTON</span></div>
+              <div class="zone r" id="zRight"><span>RIGHT 12% — ACTION RAIL</span></div>
+            </div>
+          </div>
+          <div class="prev-tools">
+            <div class="seg" id="ratioSeg">
+              <button data-ratio="9x16" data-on="1">9:16</button>
+              <button data-ratio="4x5">4:5</button>
+              <button data-ratio="1x1">1:1</button>
+              <button data-ratio="1.91x1">1.91:1</button>
+            </div>
+            <label class="zone-tog"><input type="checkbox" id="zoneTog" checked> Safe zones</label>
+            <span class="mono" style="font-size:10.5px;color:var(--faint)" id="ratioNote">Reels, Stories · 1080×1920</span>
+          </div>
+          <div class="ticks" id="ticks"></div>
+          <div class="transport" style="margin-top:10px">
+            <button class="tbtn pri" id="pPlay" aria-label="Play">
+              <svg viewBox="0 0 12 12" id="pIcon"><path d="M2 1l9 5-9 5z"/></svg>
+            </button>
+            <button class="tbtn" id="pStop" aria-label="Restart">
+              <svg viewBox="0 0 12 12"><rect x="2" y="2" width="8" height="8"/></svg>
+            </button>
+            <span class="tc mono"><b id="pNow">00:00.0</b> / <span id="pEnd">0.0</span></span>
+            <input type="range" id="pScrub" min="0" max="1000" value="0" aria-label="Scrub">
+            <span class="tag" id="pScene">Scene 1 · Full</span>
+          </div>
+        </div>
+
+        <div class="stack">
+          <div class="card pad">
+            <div class="eyebrow" style="margin-bottom:9px">Reviewing</div>
+            <div class="vars" id="prevVars" style="margin-top:0"></div>
+            <p style="font-size:11.5px;color:var(--muted);margin-top:10px">
+              Each variant exports as its own ad. Check every one before pushing — a bad hook is the most expensive thing to discover after launch.
+            </p>
+          </div>
+
+          <div class="card pad">
+            <div class="eyebrow" style="margin-bottom:6px">Pre-flight</div>
+            <div id="checks"></div>
+          </div>
+
+          <div class="card pad" id="approveCard">
+            <div class="eyebrow" style="margin-bottom:9px">Next step</div>
+            <div id="approveState">
+              <p style="font-size:11.5px;color:var(--muted);margin-bottom:10px">
+                Check every variant, then send them for review. Nothing reaches Meta from here.
+              </p>
+              <button class="btn signal" style="width:100%" id="approveBtn">Submit for review</button>
+            </div>
+            <div id="approvedState" style="display:none">
+              <div class="chk" data-s="ok" style="border:none;padding:0 0 10px">
+                <span class="dotc"></span>
+                <span><strong style="font-weight:600" id="approvedLbl">Submitted</strong>
+                <p>Waiting in the review queue. Nothing has been sent to Meta.</p></span>
+              </div>
+              <div class="row" style="gap:7px">
+                <button class="btn ghost sm" style="flex:1" data-go="recs">Build another clip</button>
+                <button class="btn sm signal" style="flex:1" data-go="queue">Open queue</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 06 QUEUE -->
+    <section class="screen" id="s-queue">
+      <div class="qtabs" id="qtabs">
+        <button class="qtab" data-q="review" data-on="1">In review <span class="n" id="nReview">0</span></button>
+        <button class="qtab" data-q="approved">Approved <span class="n" id="nApproved">0</span></button>
+        <button class="qtab" data-q="sent">Sent <span class="n" id="nSent">0</span></button>
+      </div>
+
+      <div class="bulk" id="bulkBar">
+        <span class="cnt" id="bulkCount">0 selected</span>
+        <span class="sp"></span>
+        <span id="bulkActions"></span>
+      </div>
+
+      <div class="card" style="overflow:hidden;margin-top:12px" id="qTableWrap"></div>
+
+      <p style="margin-top:10px;font-size:11.5px;color:var(--muted)" id="qFoot"></p>
+    </section>
+
+    <!-- 07 PUSH -->
+    <section class="screen" id="s-push">
+      <div class="push">
+        <div class="card pad">
+          <div class="eyebrow" style="margin-bottom:11px">Creatives</div>
+          <div id="pushList"></div>
+          <div class="note" style="margin-top:12px">
+            One ad per variant, all into the same ad set. Not dynamic creative — mixing videos inside one ad breaks the video-to-ad join and corrupts the learning loop.
+          </div>
+        </div>
+
+        <div class="stack">
+          <div class="card pad">
+            <div class="eyebrow" style="margin-bottom:9px">Send as</div>
+            <div class="seg" id="modeSeg" style="width:100%">
+              <button data-mode="ads" data-on="1" style="flex:1">Create paused ads</button>
+              <button data-mode="lib" style="flex:1">Media library only</button>
+            </div>
+            <p style="font-size:11.5px;color:var(--muted);margin-top:9px" id="modeNote">
+              Builds a full ad per variant in the chosen ad set, paused. Goes through Meta ad review.
+            </p>
+          </div>
+
+          <div class="card pad" id="destCard">
+            <div class="eyebrow" style="margin-bottom:11px">Destination</div>
+            <div class="ctrl">
+              <label for="acct">Ad account</label>
+              <select id="acct"><option>Klira — act_882140556</option></select>
+            </div>
+            <div id="adOnly">
+            <div class="ctrl">
+              <label for="camp">Campaign</label>
+              <select id="camp"></select>
+            </div>
+            <div class="ctrl">
+              <label for="adset">Ad set <b id="adsetMeta"></b></label>
+              <select id="adset"></select>
+            </div>
+            <p style="font-size:11px;color:var(--muted);margin:-2px 0 12px">
+              Budget, targeting and placements come from the ad set. This tool never creates campaigns or ad sets.
+            </p>
+
+            <div class="eyebrow" style="margin:14px 0 9px">Identity</div>
+            <div class="row" style="gap:8px">
+              <div class="ctrl" style="flex:1">
+                <label for="fbpage">Facebook Page</label>
+                <select id="fbpage"><option>Klira</option><option>Klira Clinic</option></select>
+              </div>
+              <div class="ctrl" style="flex:1">
+                <label for="igacct">Instagram</label>
+                <select id="igacct"><option>@klira.skin</option><option>Use Page identity</option></select>
+              </div>
+            </div>
+
+            <div class="eyebrow" style="margin:14px 0 9px">Creative fields</div>
+            <div class="ctrl">
+              <label for="ptxt">Primary text</label>
+              <input type="text" id="ptxt" value="Your barrier isn't broken. It's just been through a lot.">
+            </div>
+            <div class="ctrl">
+              <label for="hline">Headline</label>
+              <input type="text" id="hline" value="Prescription skincare, made simple">
+            </div>
+            <div class="row" style="gap:8px">
+              <div class="ctrl" style="flex:1">
+                <label for="cta">CTA button</label>
+                <select id="cta">
+                  <option>Learn more</option><option>Shop now</option>
+                  <option>Sign up</option><option>Get offer</option>
+                </select>
+              </div>
+              <div class="ctrl" style="flex:1">
+                <label for="thumb">Thumbnail</label>
+                <select id="thumb">
+                  <option>Auto (Meta picks)</option>
+                  <option>First frame</option>
+                  <option>Frame at 2.0s</option>
+                  <option>Custom upload</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="eyebrow" style="margin:14px 0 9px">Landing page</div>
+            <div class="ctrl">
+              <label for="lp">Destination URL</label>
+              <input type="text" id="lp" value="https://klira.skin/consultation">
+            </div>
+            <label class="toggle"><input type="checkbox" id="utmOn" checked> Append UTM parameters</label>
+            <div id="utmWrap">
+              <div class="row" style="gap:8px;margin-top:8px">
+                <div class="ctrl" style="flex:1">
+                  <label for="utmSrc">Source</label>
+                  <input type="text" id="utmSrc" value="meta">
+                </div>
+                <div class="ctrl" style="flex:1">
+                  <label for="utmMed">Medium</label>
+                  <input type="text" id="utmMed" value="paid_social">
+                </div>
+              </div>
+              <div class="ctrl">
+                <label for="utmCamp">Campaign</label>
+                <input type="text" id="utmCamp" value="klira_podcast_clips">
+              </div>
+              <div class="note" style="margin-top:4px">
+                <strong>utm_content</strong> is set per variant from its name, so post-click performance is readable by hook in GA4 — not just in Ads Manager.
+                <div class="mono" id="utmPreview" style="font-size:10px;margin-top:6px;word-break:break-all;color:#3D3316"></div>
+              </div>
+            </div>
+            </div>
+
+            <div id="libOnly" style="display:none">
+              <div class="note">
+                Videos are uploaded to the ad account's media library and nothing else is created. No ad, no ad set, no spend, and no ad review — so nothing can be rejected at this stage. Whoever builds the ad picks them up in Ads Manager.
+              </div>
+              <div class="ctrl" style="margin-top:12px">
+                <label for="libTag">Name prefix</label>
+                <input type="text" id="libTag" value="KLR_POD_barrier">
+              </div>
+              <p style="font-size:11px;color:var(--muted);margin-top:-4px">
+                Variant suffixes are appended automatically so hooks stay identifiable in the library.
+              </p>
+            </div>
+          </div>
+
+          <div class="card pad">
+            <div class="eyebrow" style="margin-bottom:9px">Progress</div>
+            <div class="steps">
+              <div class="step" data-s="done"><div class="pip"></div>
+                <div><h4>Videos uploaded</h4><p>All variants received by Meta</p></div></div>
+              <div class="step" data-s="done"><div class="pip"></div>
+                <div><h4>Processing finished</h4><p>Took 1m 48s</p></div></div>
+              <div class="step" data-s="done"><div class="pip"></div>
+                <div><h4>Creatives built</h4><p>One AdCreative per variant</p></div></div>
+              <div class="step" data-s="live"><div class="pip"></div>
+                <div><h4>Ads created, paused</h4><p>One ad per variant, same ad set. Failures are isolated — successful variants stay created.</p></div></div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:13px;flex-wrap:wrap">
+              <span class="status paused">PAUSED</span>
+              <span class="status rev">IN REVIEW</span>
+            </div>
+            <div class="note" style="margin-top:12px" id="rejNote">
+              Prescription claims get rejected more often than most categories. Rejections and upload failures are shown per variant above, with the reason — you won't need to go looking in Ads Manager.
+            </div>
+          </div>
+
+          <div class="card pad">
+            <div class="eyebrow" style="margin-bottom:9px">Record</div>
+            <dl class="kv">
+              <dt>Source</dt><dd>Barrier repair, with Dr Emma Craythorne</dd>
+              <dt>Source segment</dt><dd class="mono" id="recSeg">00:12:04.320 → 00:12:31.880</dd>
+              <dt>Suggested by</dt><dd id="recRank">Machine · rank 1 of 6</dd>
+              <dt>Subtitle style</dt><dd>Klira default</dd>
+              <dt>Variants</dt><dd id="recVars">1 — A</dd>
+              <dt>Built by</dt><dd>Ryham · 6 Aug 2026</dd>
+            </dl>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- BRAND ASSETS -->
+    <section class="screen" id="s-assets">
+      <div class="stack">
+        <div class="drop" id="dropAsset">
+          <h3>Upload brand assets</h3>
+          <p>Product stills, end cards, logos, b-roll. Square and 4:5 stills drop straight into a split without reframing.</p>
+          <span class="pill">Choose files</span>
+        </div>
+        <div>
+          <h2 class="sec">Product stills</h2>
+          <div class="assets" id="assetGrid"></div>
+        </div>
+        <div class="note">
+          A vertical split makes each half 1080×960. Anything square or 4:5 fits without cropping — anything wider gets centre-cropped on render, so check the framing before it ships.
+        </div>
+      </div>
+    </section>
+
+    <!-- STYLES -->
+    <section class="screen" id="s-styles">
+      <div class="stack" style="max-width:760px">
+        <div class="note">
+          Previews here render with the same font files the export uses. What you approve is what ships.
+        </div>
+        <div class="card pad">
+          <div class="eyebrow" style="margin-bottom:12px">Saved styles</div>
+          <div class="stack">
+            <div class="row" style="align-items:center;justify-content:space-between;padding-bottom:12px;border-bottom:1px solid var(--line-2)">
+              <div>
+                <div style="font-weight:600;font-size:13px">Klira default</div>
+                <div class="mono" style="font-size:10.5px;color:var(--muted);margin-top:2px">Inter 700 · 30px · outline 3 · highlight #FFC629</div>
+              </div>
+              <div class="row" style="gap:6px"><span class="tag hot">default</span><button class="btn ghost sm">Edit</button></div>
+            </div>
+            <div class="row" style="align-items:center;justify-content:space-between;padding-bottom:12px;border-bottom:1px solid var(--line-2)">
+              <div>
+                <div style="font-weight:600;font-size:13px">Bold pop</div>
+                <div class="mono" style="font-size:10.5px;color:var(--muted);margin-top:2px">Archivo 700 · 40px · caps · outline 5 · highlight #4ED6A1</div>
+              </div>
+              <button class="btn ghost sm">Edit</button>
+            </div>
+            <div class="row" style="align-items:center;justify-content:space-between">
+              <div>
+                <div style="font-weight:600;font-size:13px">Clean caption</div>
+                <div class="mono" style="font-size:10.5px;color:var(--muted);margin-top:2px">Inter 500 · 24px · box · no highlight</div>
+              </div>
+              <button class="btn ghost sm">Edit</button>
+            </div>
+          </div>
+        </div>
+        <div class="card pad">
+          <div class="eyebrow" style="margin-bottom:9px">Fonts available to the renderer</div>
+          <div class="row" style="flex-wrap:wrap;gap:6px">
+            <span class="tag">Inter</span><span class="tag">Archivo</span>
+            <span class="tag">JetBrains Mono</span><span class="tag">Klira Sans (brand)</span>
+          </div>
+          <p style="font-size:11.5px;color:var(--muted);margin-top:9px">
+            Fonts are installed in the render worker. Adding one here makes it available to both the preview and the export.
+          </p>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+const DUR = 2832; // 47:12
+
+const RECS = [
+  { id:1, s:724, e:751.6, rank:1, score:.91,
+    q:"Your barrier isn't broken — it's just been through a lot. Give it three weeks of doing less.",
+    why:"Opens on a direct reassurance, which is the pattern in your three highest-thumbstop creatives. Dr Craythorne is on screen alone from the first frame.",
+    tags:["direct question","expert on camera","barrier"], n:9, stat:"7 of 9 above median thumbstop" },
+  { id:2, s:1103, e:1124, rank:2, score:.84,
+    q:"Everyone asks me about retinol. Almost nobody asks about the thing that makes retinol tolerable.",
+    why:"Contrarian setup. Two ads used this shape; both held above 40%. Small sample — worth testing rather than trusting.",
+    tags:["contrarian open","ingredient"], n:2, stat:"2 of 2 above median hold" },
+  { id:3, s:1588, e:1611.4, rank:3, score:.79,
+    q:"I've had patients cry in my clinic over their skin. It isn't vanity. It's exhausting.",
+    why:"Emotional open with no product mention in the first eight seconds. Matches your longest-running creative.",
+    tags:["emotional open","no early product"], n:5, stat:"4 of 5 above median hold" },
+  { id:4, s:1902, e:1919, rank:4, score:.71,
+    q:"Purging and breaking out look identical. The difference is where, and how long.",
+    why:"Names a specific concern in the first line. Concern-naming appears in six of your top ten by ROAS.",
+    tags:["concern named","acne"], n:6, stat:"6 of 10 top-ROAS ads share this" },
+  { id:5, s:2210, e:2231.5, rank:5, score:.64,
+    q:"If your routine has nine steps, I can promise you at least four are working against each other.",
+    why:"Numeric hook. Thin evidence in your set — flagged because it tests well elsewhere in the category, not because Klira data supports it.",
+    tags:["numeric hook","routine"], n:1, stat:"1 comparable ad — weak evidence" },
+  { id:6, s:2544, e:2566, rank:6, score:.58,
+    q:"You don't need a prescription to start. You need to stop doing the thing that's causing it.",
+    why:"Strong line, but references prescription status. Compliance flag raised — legal review before it runs.",
+    tags:["claim: treatment","compliance"], n:3, stat:"3 comparable ads", flag:true }
+];
+
+const LINES = [
+  [712,"Chloe","So the question everyone sends in — how do I actually know if my barrier is damaged?"],
+  [724,"Dr Craythorne","Your barrier isn't broken. It's just been through a lot.",1],
+  [733,"Dr Craythorne","Tightness after cleansing, stinging from things that never used to sting, that's the signal.",1],
+  [745,"Dr Craythorne","Give it three weeks of doing less and most people are surprised.",1],
+  [758,"Chloe","Doing less feels counterintuitive when you've spent money on a routine."],
+  [769,"Dr Craythorne","It does. But the routine is often the thing causing it."],
+  [1096,"Chloe","Let's talk retinol, because that's the one that scares people."],
+  [1103,"Dr Craythorne","Everyone asks me about retinol. Almost nobody asks about the thing that makes retinol tolerable.",1],
+  [1118,"Dr Craythorne","Which is barrier support. Get that right and tolerance stops being the issue.",1],
+  [1131,"Chloe","So it's sequencing rather than strength."],
+  [1580,"Chloe","Does it come up much, the emotional side?"],
+  [1588,"Dr Craythorne","I've had patients cry in my clinic over their skin. It isn't vanity. It's exhausting.",1],
+  [1602,"Dr Craythorne","You're carrying it on your face. There's nowhere to put it down.",1],
+  [1618,"Chloe","That's stayed with me since we last spoke, honestly."]
+];
+
+let CLIP = "Your barrier isn't broken. It's just been through a lot.";
+let LOADED = RECS[0];
+let IN = RECS[0].s, OUT = RECS[0].e;
+
+const $ = s => document.querySelector(s);
+const fmt = t => {
+  const h=String(Math.floor(t/3600)).padStart(2,"0");
+  const m=String(Math.floor(t%3600/60)).padStart(2,"0");
+  const s=Math.floor(t%60).toString().padStart(2,"0");
+  const ms=String(Math.round(t%1*1000)).padStart(3,"0");
+  return `${h}:${m}:${s}.${ms}`;
+};
+const mmss = t => `${Math.floor(t/60)}:${String(Math.floor(t%60)).padStart(2,"0")}`;
+
+/* ---- nav ---- */
+const META = {
+  library:["Library","Long-form source material and the ad back catalogue"],
+  analyse:["Transcript","Word-level timing, speakers and scene boundaries"],
+  recs:["Suggested cuts","Segments worth a look, with the evidence behind each"],
+  build:["Clip builder","Frame it, subtitle it, export it"],
+  preview:["Preview","Watch each variant end to end, then submit for review"],
+  queue:["Review queue","Approve creatives, then send them to Meta in a batch"],
+  push:["Send to Meta","Creates a paused ad in an existing ad set"],
+  assets:["Brand assets","Product stills, end cards and logos used in splits"],
+  styles:["Subtitle styles","Presets shared across every clip"]
+};
+function go(id){
+  document.querySelectorAll(".screen").forEach(s=>s.classList.toggle("on",s.id==="s-"+id));
+  document.querySelectorAll("#nav .nav-item").forEach(b=>b.setAttribute("aria-current",String(b.dataset.go===id)));
+  $("#ttl").textContent=META[id][0]; $("#sub").textContent=META[id][1];
+  if(id==="preview") resetPreview(); else setPreviewPlaying(false);
+  if(id==="push") paintPush();
+  if(id==="queue") paintQueue();
+  $("#acts").innerHTML = id==="analyse"
+    ? '<button class="btn signal sm" data-go="recs">See suggested cuts</button>'
+    : id==="recs" ? '<button class="btn ghost sm" data-go="analyse">Back to transcript</button>'
+    : id==="build" ? '<button class="btn ghost sm" data-go="recs">Back to cuts</button>' : "";
+  window.scrollTo({top:0,behavior:"instant"});
+}
+document.addEventListener("click",e=>{
+  const l=e.target.closest("[data-load]");
+  if(l){ loadRec(l.dataset.load); return }
+  const t=e.target.closest("[data-go]"); if(t){go(t.dataset.go); return}
+  const a=e.target.closest("[data-open]"); if(a){go("analyse")}
+});
+
+/* ---- timeline ---- */
+const pct = t => t/DUR*100;
+$("#ruler").innerHTML = [0,.2,.4,.6,.8,1].map(f=>`<span>${mmss(DUR*f)}</span>`).join("");
+
+let sceneHTML="";
+for(let i=1;i<40;i++){
+  const p=i/40*100 + (Math.sin(i*2.3)*0.7);
+  sceneHTML+=`<div class="scene" style="left:${p}%"></div>`;
+}
+$("#lane-scene").innerHTML=sceneHTML;
+
+let spkHTML="",cur=0,who=0;
+while(cur<DUR){
+  const len=28+Math.abs(Math.sin(cur))*95;
+  spkHTML+=`<div class="spk ${who?'b':'a'}" style="left:${pct(cur)}%;width:${pct(Math.min(len,DUR-cur))}%"></div>`;
+  cur+=len+2; who^=1;
+}
+$("#lane-spk").innerHTML=spkHTML;
+
+$("#lane-rec").innerHTML = RECS.map(r=>{
+  const mid = (r.s+r.e)/2, w = Math.max(pct(r.e-r.s), 0.5);
+  return `<button class="rec" data-rec="${r.id}" style="left:${pct(mid)}%"
+    title="${fmt(r.s).slice(0,8)} → ${fmt(r.e).slice(0,8)} · ${(r.e-r.s).toFixed(1)}s">
+    <span>${r.rank}</span></button>`;
+}).join("");
+
+// duration bands sit in the lane behind the markers
+$("#lane-rec").insertAdjacentHTML("afterbegin", RECS.map(r=>{
+  const w = pct(r.e-r.s);
+  return `<span style="position:absolute;top:3px;bottom:3px;left:${pct(r.s)}%;
+    width:${Math.max(w,0.4)}%;background:rgba(255,198,41,.35);
+    border-left:1px solid var(--signal-deep);border-right:1px solid var(--signal-deep);
+    border-radius:2px;pointer-events:none"></span>`;
+}).join(""));
+
+function setPlayhead(t){ $("#ph").style.left = pct(t)+"%"; }
+setPlayhead(724);
+
+function loadRec(id){
+  const r = RECS.find(x=>x.id===+id); if(!r) return;
+  LOADED = r; CLIP = r.q; active = 0;
+  IN = r.s; OUT = r.e;
+
+  document.querySelectorAll(".rec").forEach(o=>o.dataset.on = o.dataset.rec==String(id)?"1":"0");
+  setPlayhead(r.s);
+
+  const dur = (r.e-r.s).toFixed(1);
+  $("#ptxt").value  = r.q;
+  $("#recSeg").textContent  = `${fmt(r.s)} → ${fmt(r.e)}`;
+  $("#recRank").textContent = `Machine · rank ${r.rank} of ${RECS.length}`;
+
+  if(typeof resetApproval==="function") resetApproval();
+  setPlaying(false); T = 0; WT = wordTimes();
+  VARIANTS=[{name:"Control", scenes:[]}]; vi=0;
+  resetScenes(); paintVariants(); paintScenes(); paintLayoutPicker();
+  buildFrames(); paintTrim(); paintStrip(); syncTransport(); render();
+  go("build");
+}
+
+document.querySelectorAll(".rec").forEach(b=>{
+  b.addEventListener("click",()=>loadRec(b.dataset.rec));
+});
+
+/* ---- transcript ---- */
+$("#tx").innerHTML = LINES.map(([t,spk,txt,mark])=>
+  `<div class="tx-line ${mark?'mark':''}" data-t="${t}">
+     <div class="tx-t">${fmt(t)}</div>
+     <div class="tx-s">${spk}</div>
+     <div class="tx-x">${txt}</div>
+   </div>`).join("");
+document.querySelectorAll(".tx-line").forEach(l=>{
+  l.addEventListener("click",()=>setPlayhead(+l.dataset.t));
+});
+
+/* ---- recommendations ---- */
+$("#recs").innerHTML = RECS.map(r=>`
+  <div class="card rc">
+    <div class="rc-top">
+      <div>
+        <div class="rc-time">${fmt(r.s).slice(0,8)} → ${fmt(r.e).slice(0,8)}</div>
+        <div class="rc-dur">${(r.e-r.s).toFixed(1)}s · rank ${r.rank}</div>
+      </div>
+      <span class="tag ${r.flag?'flag':'hot'}">${r.flag?'compliance':'score '+r.score.toFixed(2)}</span>
+    </div>
+    <div class="rc-q">"${r.q}"</div>
+    <div class="rc-why">${r.why}</div>
+    <div class="rc-tags">${r.tags.map(t=>`<span class="tag${t.startsWith('claim')||t==='compliance'?' flag':''}">${t}</span>`).join(" ")}</div>
+    <div class="rc-foot">
+      <span class="evidence">n=${r.n} · ${r.stat}</span>
+      <button class="btn sm" data-load="${r.id}">Open</button>
+    </div>
+  </div>`).join("");
+
+/* ---- clip builder ---- */
+const PRESETS = {
+  klira:{fs:30,ol:3,vp:72,wpl:4,hl:"#FFC629",caps:false,box:false},
+  bold:{fs:40,ol:5,vp:66,wpl:3,hl:"#4ED6A1",caps:true,box:false},
+  clean:{fs:24,ol:0,vp:80,wpl:6,hl:"#FFFFFF",caps:false,box:true}
+};
+let S = {...PRESETS.klira, fix:"Klira"}, active=0;
+
+function words(){
+  const w = CLIP.split(" ");
+  const lines=[]; for(let i=0;i<w.length;i+=S.wpl) lines.push(w.slice(i,i+S.wpl));
+  return lines;
+}
+function paintStage(){
+  const s = SCENES[sel] || {layout:"full", ratio:.5};
+  const lower=$("#layLower"), card=$("#layCard");
+  card.style.display = s.layout==="card" ? "flex" : "none";
+  if(s.layout==="split_product" || s.layout==="split_speakers"){
+    lower.style.display="flex";
+    lower.style.height=((1-s.ratio)*100)+"%";
+    lower.style.background = s.layout==="split_product"
+      ? (ASSETS.find(a=>a.id===s.asset)||ASSETS[0]).g
+      : "linear-gradient(135deg,#3A4252,#6E7A8F)";
+  } else {
+    lower.style.display="none";
+  }
+}
+
+function render(){
+  const scale = 1/520*100;
+  const lines = words();
+  let n=0;
+  const html = lines.map(l=>`<div>${l.map(w=>{
+    const on = (n++)===active;
+    return `<b style="color:${on?S.hl:'#fff'}">${S.caps?w.toUpperCase():w}</b>`;
+  }).join(" ")}</div>`).join("");
+
+  [$("#cap")].forEach((el,i)=>{
+    const f = S.fs*0.52;
+    el.innerHTML = html;
+    el.style.cssText += `
+      font-family:'Inter',sans-serif;font-weight:700;line-height:1.22;
+      font-size:${f}px;color:#fff;letter-spacing:-.01em;
+      text-shadow:${S.ol?`0 0 ${S.ol}px #000,0 0 ${S.ol}px #000,0 ${S.ol/2}px ${S.ol}px rgba(0,0,0,.6)`:'none'};
+      ${i===0?`top:${S.vp}%;transform:translateY(-50%);`:''}
+      ${S.box?'background:rgba(0,0,0,.62);padding:5px 9px;border-radius:3px;':'background:none;padding:0;'}
+    `;
+  });
+  $("#fsv").textContent=S.fs+"px"; $("#olv").textContent=S.ol+"px";
+  $("#vpv").textContent=S.vp+"%"; $("#wplv").textContent=S.wpl;
+  paintStage();
+  if(typeof paintSummaries==="function") paintSummaries();
+}
+["fs","ol","vp","wpl"].forEach(k=>{
+  $("#"+k).addEventListener("input",e=>{S[k]=+e.target.value;render()});
+});
+$("#caps").addEventListener("change",e=>{S.caps=e.target.checked;render()});
+$("#box").addEventListener("change",e=>{S.box=e.target.checked;render()});
+document.querySelectorAll("#hl .sw").forEach(b=>{
+  b.addEventListener("click",()=>{
+    document.querySelectorAll("#hl .sw").forEach(o=>o.dataset.on="0");
+    b.dataset.on="1"; S.hl=b.dataset.c; render();
+  });
+});
+document.querySelectorAll("#presets .chip").forEach(b=>{
+  b.addEventListener("click",()=>{
+    document.querySelectorAll("#presets .chip").forEach(o=>o.dataset.on="0");
+    b.dataset.on="1";
+    S={...S,...PRESETS[b.dataset.p]};
+    $("#fs").value=S.fs; $("#ol").value=S.ol; $("#vp").value=S.vp; $("#wpl").value=S.wpl;
+    $("#caps").checked=S.caps; $("#box").checked=S.box;
+    document.querySelectorAll("#hl .sw").forEach(o=>o.dataset.on = o.dataset.c===S.hl?"1":"0");
+    render();
+  });
+});
+
+// Safe zones by placement. 1.91:1 is a Google PMax size — Google recrops
+// assets automatically, so the guidance is margin at every edge rather than
+// specific UI overlays.
+const SAFE = {
+  "9x16":  {t:14, b:16, r:12, note:"TOP 14% — PROFILE, USERNAME, AD LABEL", noteB:"BOTTOM 16% — CAPTION, CTA BUTTON"},
+  "4x5":   {t:5,  b:9,  r:0,  note:"TOP 5%", noteB:"BOTTOM 9% — CAPTION, CTA"},
+  "1x1":   {t:9,  b:11, r:0,  note:"TOP 9% — PROFILE, AD LABEL", noteB:"BOTTOM 11% — CAPTION, CTA"},
+  "1.91x1":{t:8,  b:8,  r:8,  note:"TOP 8% — PMAX AUTO-CROP MARGIN", noteB:"BOTTOM 8% — PMAX AUTO-CROP MARGIN"}
+};
+
+/* ---- crop: direct manipulation ----
+   Source is 16:9. A target narrower than the source crops the width and drags
+   horizontally; a target wider than the source (1.91:1) crops the height and
+   drags vertically. */
+const SRC_AR = 16/9;
+const RATIOS = {
+  "9x16":  {ar: 9/16,    label:"9:16",   px:"1080×1920", use:"Reels, Stories"},
+  "4x5":   {ar: 4/5,     label:"4:5",    px:"1080×1350", use:"Feed"},
+  "1x1":   {ar: 1,       label:"1:1",    px:"1080×1080", use:"Feed, Explore"},
+  "1.91x1":{ar: 1.91,    label:"1.91:1", px:"1200×628",  use:"PMax, landscape"}
+};
+function cropBox(key){
+  const ar=RATIOS[key].ar;
+  return ar < SRC_AR
+    ? {w: ar/SRC_AR*100, h: 100, axis:"x"}    // narrower than source — crop width
+    : {w: 100, h: SRC_AR/ar*100, axis:"y"};   // wider than source — crop height
+}
+
+let bRatio = "9x16";
+let cropX = 34, cropY = 0;
+
+const CROPS=[[0,20,"Wide left"],[20,50,"Centred on Dr Craythorne"],[50,100,"Centred on Chloe"]];
+function paintCrop(){
+  const c=$("#crop"), b=cropBox(bRatio);
+  c.style.width  = b.w+"%";
+  c.style.height = b.h+"%";
+  c.style.left   = (b.axis==="x" ? cropX : 0)+"%";
+  c.style.top    = (b.axis==="y" ? cropY : 0)+"%";
+
+  const lbl = CROPS.find(([a,z])=>cropX>=a&&cropX<=z) || CROPS[1];
+  $("#cropv").textContent = b.axis==="y"
+    ? (cropY < 12 ? "Framed high" : cropY > 4 ? "Framed low" : "Centred")
+    : bRatio==="1x1" ? "Square crop" : lbl[2];
+}
+
+function setBuilderRatio(r){
+  bRatio = r;
+  const b=cropBox(r);
+  cropX = Math.max(0, Math.min(100-b.w, cropX));
+  cropY = Math.max(0, Math.min(100-b.h, cropY));
+  $("#cropRatio").textContent = RATIOS[r].label;
+  $("#bRatioNote").textContent = `${RATIOS[r].use} · ${RATIOS[r].px}`;
+  const zt=$("#crop").querySelector(".zone.t"), zb=$("#crop").querySelector(".zone.b");
+  const sz=SAFE[r];
+  zt.style.height = sz.t+"%"; zb.style.height = sz.b+"%";
+  zt.style.display = sz.t ? "" : "none";
+  zb.style.display = sz.b ? "" : "none";
+  paintCrop();
+}
+document.querySelectorAll("#bRatioSeg button").forEach(b=>{
+  b.addEventListener("click",()=>{
+    document.querySelectorAll("#bRatioSeg button").forEach(o=>o.dataset.on="0");
+    b.dataset.on="1";
+    setBuilderRatio(b.dataset.br);
+  });
+});
+$("#bZoneTog").addEventListener("change",e=>{
+  $("#crop").classList.toggle("zones", e.target.checked);
+});
+
+(function cropDrag(){
+  const crop=$("#crop"), src=$("#src");
+  let startX=0, startY=0, startL=0, startT=0;
+  crop.addEventListener("pointerdown",e=>{
+    crop.setPointerCapture(e.pointerId);
+    crop.classList.add("drag");
+    startX=e.clientX; startY=e.clientY; startL=cropX; startT=cropY;
+    e.preventDefault();
+  });
+  crop.addEventListener("pointermove",e=>{
+    if(!crop.classList.contains("drag")) return;
+    const r=src.getBoundingClientRect(), b=cropBox(bRatio);
+    if(b.axis==="x") cropX = Math.max(0, Math.min(100-b.w, startL + (e.clientX-startX)/r.width*100));
+    else             cropY = Math.max(0, Math.min(100-b.h, startT + (e.clientY-startY)/r.height*100));
+    paintCrop();
+  });
+  const end = e => { crop.classList.remove("drag"); try{crop.releasePointerCapture(e.pointerId)}catch(_){} };
+  crop.addEventListener("pointerup",end);
+  crop.addEventListener("pointercancel",end);
+  crop.addEventListener("keydown",e=>{
+    const step = e.shiftKey?5:1, b=cropBox(bRatio);
+    if(b.axis==="x"){
+      if(e.key==="ArrowLeft"){ cropX=Math.max(0,cropX-step); paintCrop(); e.preventDefault() }
+      if(e.key==="ArrowRight"){ cropX=Math.min(100-b.w,cropX+step); paintCrop(); e.preventDefault() }
+    } else {
+      if(e.key==="ArrowUp"){ cropY=Math.max(0,cropY-step); paintCrop(); e.preventDefault() }
+      if(e.key==="ArrowDown"){ cropY=Math.min(100-b.h,cropY+step); paintCrop(); e.preventDefault() }
+    }
+  });
+  crop.tabIndex=0;
+})();
+setBuilderRatio("9x16");
+
+/* ---- brand assets ---- */
+const ASSETS = [
+  {id:"a1", name:"Klira bottle — white", kind:"Product still", g:"linear-gradient(150deg,#C8A2AE,#E6D0D6)"},
+  {id:"a2", name:"Klira bottle — hand", kind:"Product still", g:"linear-gradient(150deg,#B9A292,#DCCBBC)"},
+  {id:"a3", name:"Texture macro", kind:"Product still", g:"linear-gradient(150deg,#9FB0A8,#D2DDD6)"},
+  {id:"a4", name:"End card — start now", kind:"End card", g:"linear-gradient(150deg,#1B1D22,#33363E)"},
+  {id:"a5", name:"End card — consult", kind:"End card", g:"linear-gradient(150deg,#22252B,#3C4048)"},
+  {id:"a6", name:"Wordmark, light", kind:"Logo", g:"linear-gradient(150deg,#EFEDE7,#FFFFFF)"}
+];
+$("#assetGrid").innerHTML = ASSETS.map(a=>`
+  <div class="ass">
+    <div class="sq" style="background:${a.g}"><span>1:1</span></div>
+    <div class="nm">${a.name}</div><div class="kd">${a.kind}</div>
+  </div>`).join("");
+$("#slot").innerHTML = ASSETS.filter(a=>a.kind!=="Logo")
+  .map(a=>`<option value="${a.id}">${a.name}</option>`).join("");
+
+/* ---- upload simulation ---- */
+const STAGES=["uploading","transcribing","detecting","tagging","ready"];
+let queue=[];
+function paintIngest(){
+  if(!queue.length){
+    $("#ingestList").innerHTML =
+      '<div class="ingest"><span class="nm" style="color:var(--muted);font-weight:400">Nothing processing. Drop a file above to start.</span></div>';
+    return;
+  }
+  $("#ingestList").innerHTML = queue.map(q=>`
+    <div class="ingest">
+      <span class="nm">${q.name}</span>
+      <span class="stage-lbl">${STAGES[q.stage]}</span>
+      <span class="prog"><i style="width:${q.pct}%"></i></span>
+    </div>`).join("");
+}
+function fakeUpload(name){
+  const item={name, stage:0, pct:0};
+  queue.unshift(item); paintIngest();
+  const iv=setInterval(()=>{
+    item.pct+=6+Math.random()*9;
+    if(item.pct>=100){
+      item.pct=0; item.stage++;
+      if(item.stage>=STAGES.length-1){
+        item.stage=STAGES.length-1; item.pct=100; clearInterval(iv);
+      }
+    }
+    paintIngest();
+  },320);
+}
+[["#dropLong","klira-podcast-ep09.mp4"],["#dropAd","KLR_UGC_barrier_09.mp4"],["#dropAsset","klira-bottle-hero.png"]]
+  .forEach(([sel,fn])=>{
+    const el=$(sel); if(!el) return;
+    el.addEventListener("click",()=>{ fakeUpload(fn); if(sel!=="#dropAsset") go("library") });
+    el.addEventListener("dragover",e=>{e.preventDefault();el.classList.add("over")});
+    el.addEventListener("dragleave",()=>el.classList.remove("over"));
+    el.addEventListener("drop",e=>{
+      e.preventDefault(); el.classList.remove("over");
+      const f=e.dataTransfer.files[0];
+      fakeUpload(f?f.name:fn);
+    });
+  });
+paintIngest();
+
+/* ---- scenes ---- */
+const LY_NAME={full:"Full",split_product:"Product",split_speakers:"Speakers",card:"End card"};
+let SCENES=[], sel=0;
+
+function resetScenes(){
+  setScenes([{layout:"full", in:IN, out:OUT, lift:true, asset:"a1", ratio:0.5}]);
+  sel=0;
+}
+function scenePreview(s){
+  if(s.layout==="card") return '<span class="pv-card"></span>';
+  if(s.layout==="full")  return '<span class="pv-half pv-vid" style="top:0;bottom:0"></span>';
+  const top=(s.ratio*100);
+  const lower = s.layout==="split_product" ? "pv-ast" : "pv-vid";
+  return `<span class="pv-half pv-vid" style="top:0;height:${top}%"></span>
+          <span class="pv-half ${lower}" style="top:${top}%;bottom:0"></span>`;
+}
+function sceneDur(s){ return s.layout==="card" ? (s.dur||2.5) : (s.out-s.in) }
+
+function paintScenes(){
+  if(typeof syncTemplateChip==="function") syncTemplateChip();
+  $("#sceneRail").innerHTML = SCENES.map((s,i)=>`
+    <div class="scn" draggable="true" data-scn="${i}" data-on="${i===sel?1:0}">
+      <span class="pv">${scenePreview(s)}<span class="hnd-grip">⋮⋮</span></span>
+      <span class="ops">
+        ${i>0?'<button class="op" data-mv="l" title="Move left">‹</button>':''}
+        ${i<SCENES.length-1?'<button class="op" data-mv="r" title="Move right">›</button>':''}
+        ${SCENES.length>1?'<button class="op" data-del="1" title="Delete scene">×</button>':''}
+      </span>
+      <span class="lb">${LY_NAME[s.layout]}<b>${sceneDur(s).toFixed(1)}s</b></span>
+    </div>`).join("") +
+    `<button class="scn-add" id="addBtn" title="Add scene or apply template">+</button>`;
+
+  document.querySelectorAll("#sceneRail .scn").forEach(el=>{
+    const i = +el.dataset.scn;
+
+    el.addEventListener("click",e=>{
+      const mv=e.target.closest("[data-mv]"), del=e.target.closest("[data-del]");
+      if(mv){ moveScene(i, mv.dataset.mv==="l" ? i-1 : i+1); return }
+      if(del){ deleteScene(i); return }
+      sel=i; paintScenes(); paintLayoutPicker(); render();
+    });
+
+    el.addEventListener("dragstart",e=>{
+      dragFrom=i; el.classList.add("dragging");
+      e.dataTransfer.effectAllowed="move";
+      e.dataTransfer.setData("text/plain",String(i));
+    });
+    el.addEventListener("dragend",()=>{
+      dragFrom=null;
+      document.querySelectorAll("#sceneRail .scn")
+        .forEach(o=>o.classList.remove("dragging","over-l","over-r"));
+    });
+    el.addEventListener("dragover",e=>{
+      if(dragFrom===null || dragFrom===i) return;
+      e.preventDefault(); e.dataTransfer.dropEffect="move";
+      const r=el.getBoundingClientRect();
+      const left = e.clientX < r.left + r.width/2;
+      el.classList.toggle("over-l", left);
+      el.classList.toggle("over-r", !left);
+    });
+    el.addEventListener("dragleave",()=>el.classList.remove("over-l","over-r"));
+    el.addEventListener("drop",e=>{
+      e.preventDefault();
+      if(dragFrom===null || dragFrom===i) return;
+      const r=el.getBoundingClientRect();
+      let to = e.clientX < r.left + r.width/2 ? i : i+1;
+      if(dragFrom < to) to--;
+      moveScene(dragFrom, to);
+    });
+  });
+
+  $("#addBtn").addEventListener("click",e=>{
+    e.stopPropagation();
+    const m=$("#addMenu"), r=$("#addBtn").getBoundingClientRect();
+    const w=$("#sceneRail").getBoundingClientRect();
+    m.style.left = Math.max(0, Math.min(r.left-w.left, w.width-190))+"px";
+    m.style.top  = (r.bottom-w.top+6)+"px";
+    m.classList.toggle("on");
+  });
+}
+
+let dragFrom=null;
+
+function moveScene(from,to){
+  if(to<0 || to>=SCENES.length || from===to) return;
+  const [s]=SCENES.splice(from,1);
+  SCENES.splice(to,0,s);
+  sel=to; paintScenes(); paintLayoutPicker(); render();
+}
+function deleteScene(i){
+  if(SCENES.length<2) return;
+  SCENES.splice(i,1);
+  sel=Math.max(0,Math.min(sel,SCENES.length-1));
+  paintScenes(); paintLayoutPicker(); render();
+}
+function addScene(layout){
+  if(layout==="card"){
+    SCENES.push({layout:"card", dur:2.5, asset:"a4", ratio:.5});
+  } else {
+    // take the second half of the last source scene so durations stay sane
+    let li=-1;
+    for(let i=SCENES.length-1;i>=0;i--) if(SCENES[i].layout!=="card"){ li=i; break }
+    if(li===-1){
+      SCENES.push({layout, in:IN, out:OUT, lift:true, asset:"a1",
+                   ratio: layout==="split_product"?.6:.5});
+    } else {
+      const src=SCENES[li], mid=(src.in+src.out)/2;
+      const added={...src, layout, in:mid, out:src.out,
+                   ratio: layout==="split_product"?.6:.5};
+      src.out=mid;
+      SCENES.splice(li+1,0,added);
+      sel=li+1; paintScenes(); paintLayoutPicker(); render();
+      return;
+    }
+  }
+  sel=SCENES.length-1;
+  paintScenes(); paintLayoutPicker(); render();
+}
+
+document.querySelectorAll("#addMenu [data-add]").forEach(b=>{
+  b.addEventListener("click",()=>{ addScene(b.dataset.add); $("#addMenu").classList.remove("on") });
+});
+document.querySelectorAll("#addMenu [data-tplm]").forEach(b=>{
+  b.addEventListener("click",()=>{
+    applyTemplate(b.dataset.tplm);
+    $("#addMenu").classList.remove("on");
+  });
+});
+document.addEventListener("click",e=>{
+  if(!e.target.closest("#addMenu") && !e.target.closest("#addBtn"))
+    $("#addMenu").classList.remove("on");
+});
+
+function paintLayoutPicker(){
+  const s=SCENES[sel]; if(!s) return;
+  if(typeof paintSummaries==="function") paintSummaries();
+  document.querySelectorAll("#layouts .ly").forEach(b=>b.dataset.on = b.dataset.ly===s.layout?"1":"0");
+  const isSplit = s.layout==="split_product" || s.layout==="split_speakers";
+  $("#slotWrap").style.display  = (s.layout==="split_product"||s.layout==="card") ? "" : "none";
+  $("#ratioWrap").style.display = isSplit ? "" : "none";
+  $("#liftWrap").style.display  = (SCENES.length>1 && s.layout!=="card") ? "flex" : "none";
+  if(s.asset) $("#slot").value = s.asset;
+  document.querySelectorAll("#ratioWrap .chip").forEach(c=>c.dataset.on = (+c.dataset.ratio===s.ratio)?"1":"0");
+  $("#lift").checked = !!s.lift;
+}
+
+document.querySelectorAll("#layouts .ly").forEach(b=>{
+  b.addEventListener("click",()=>{
+    const s=SCENES[sel]; if(!s) return;
+    s.layout=b.dataset.ly;
+    if(s.layout==="card" && !s.dur) s.dur=2.5;
+    paintScenes(); paintLayoutPicker(); render();
+  });
+});
+$("#slot").addEventListener("change",e=>{ SCENES[sel].asset=e.target.value; render() });
+document.querySelectorAll("#ratioWrap .chip").forEach(c=>{
+  c.addEventListener("click",()=>{ SCENES[sel].ratio=+c.dataset.ratio; paintScenes(); paintLayoutPicker(); render() });
+});
+$("#lift").addEventListener("change",e=>{ SCENES[sel].lift=e.target.checked });
+
+$("#splitBtn").addEventListener("click",()=>{
+  const s=SCENES[sel];
+  if(!s || s.layout==="card") return;
+  const at = IN + T;
+  if(at<=s.in+0.5 || at>=s.out-0.5) return;
+  const right={...s, in:at};
+  s.out=at;
+  SCENES.splice(sel+1,0,right);
+  sel=sel+1;
+  paintScenes(); paintLayoutPicker(); render();
+});
+
+/* ---- templates ---- */
+const TPL = {
+  plain:      c => [{layout:"full", in:c.s, out:c.e, lift:true, asset:"a1", ratio:.5}],
+  product:    c => {
+    const mid = c.s + (c.e-c.s)*0.6;
+    return [
+      {layout:"full", in:c.s, out:mid, lift:true, asset:"a1", ratio:.5},
+      {layout:"split_product", in:mid, out:c.e, lift:true, asset:"a1", ratio:.6}
+    ];
+  },
+  hookfirst:  c => {
+    const hookEnd = c.s + Math.min(4, (c.e-c.s)*0.25);
+    return [
+      {layout:"full", in:c.s, out:hookEnd, lift:true, asset:"a1", ratio:.5},
+      {layout:"split_product", in:hookEnd, out:c.e, lift:true, asset:"a1", ratio:.6},
+      {layout:"card", dur:2.5, asset:"a4", ratio:.5}
+    ];
+  }
+};
+// The chips both apply a template and describe what's currently built.
+// After any manual edit, re-derive which one the scene structure matches.
+const TPL_SHAPE = {
+  plain:     ["full"],
+  product:   ["full","split_product"],
+  hookfirst: ["full","split_product","card"]
+};
+function describeShape(){
+  const sig = SCENES.map(s=>s.layout);
+  for(const k in TPL_SHAPE){
+    if(TPL_SHAPE[k].length===sig.length && TPL_SHAPE[k].every((l,i)=>l===sig[i])) return k;
+  }
+  // not an exact template — fall back to the closest honest label
+  if(sig.includes("card")) return "hookfirst";
+  if(sig.includes("split_product")) return "product";
+  if(sig.every(l=>l==="full")) return sig.length===1 ? "plain" : "custom";
+  return "custom";
+}
+function syncTemplateChip(){
+  const k=describeShape();
+  document.querySelectorAll("#templates .chip[data-tpl]")
+    .forEach(o=>o.dataset.on = o.dataset.tpl===k ? "1" : "0");
+  const c=$("#tplCustom");
+  c.style.display = k==="custom" ? "" : "none";
+  c.dataset.on = k==="custom" ? "1" : "0";
+}
+
+function applyTemplate(key){
+  setScenes(TPL[key]({s:IN, e:OUT}));
+  sel=0;
+  paintScenes(); paintLayoutPicker(); render();
+}
+document.querySelectorAll("#templates .chip[data-tpl]").forEach(b=>{
+  b.addEventListener("click",()=>applyTemplate(b.dataset.tpl));
+});
+
+/* ---- variants ---- */
+let VARIANTS=[{name:"Control", scenes:[]}], vi=0;
+const VLAB = i => String.fromCharCode(65+i);
+
+function setScenes(arr){ SCENES=arr; if(VARIANTS[vi]) VARIANTS[vi].scenes=arr; }
+
+const NAME_SUGS=["Emotional hook","Contrarian open","Question open","Product first","Short cut","No end card"];
+
+const slug = n => n.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,18);
+function paintVariants(){
+  const rv=$("#recVars");
+  if(rv) rv.textContent = VARIANTS.map((v,i)=>`${VLAB(i)} ${v.name}`).join(" · ");
+  const html = VARIANTS.map((v,i)=>`
+    <button class="var" data-var="${i}" data-on="${i===vi?1:0}" title="Click to select · double-click to rename">
+      <span class="mk">${VLAB(i)}</span>
+      <span class="nm">${v.name}</span>
+      <span class="ct">${v.scenes.length}</span>
+      ${VARIANTS.length>1?`<span class="x" data-delvar="${i}" title="Remove">×</span>`:""}
+    </button>`).join("");
+
+  $("#varRail").innerHTML = html +
+    `<button class="var-add" id="addVar">+ Add variant</button>`;
+  $("#prevVars").innerHTML = html;
+  if(typeof paintUtm==="function" && $("#utmPreview")) {
+    const p=$("#utmPreview");
+    p.textContent = VARIANTS.map((_,i)=>utmFor(i)).join("\n");
+  }
+
+  document.querySelectorAll("[data-var]").forEach(b=>{
+    b.addEventListener("click",e=>{
+      const d=e.target.closest("[data-delvar]");
+      if(d){ e.stopPropagation(); delVariant(+d.dataset.delvar); return }
+      switchVariant(+b.dataset.var);
+    });
+    b.addEventListener("dblclick",e=>{
+      e.preventDefault();
+      openNamer("rename", +b.dataset.var);
+    });
+  });
+  $("#addVar").addEventListener("click",e=>{ e.stopPropagation(); openNamer("add") });
+}
+
+/* naming popover */
+let namerMode="add", namerTarget=null;
+function openNamer(mode, idx){
+  namerMode=mode; namerTarget=idx;
+  const n=$("#namer"), anchor = mode==="add"
+    ? $("#addVar")
+    : document.querySelector(`[data-var="${idx}"]`);
+  const w=$("#varRail").getBoundingClientRect(), r=anchor.getBoundingClientRect();
+  n.style.left = Math.max(0, Math.min(r.left-w.left, w.width-254))+"px";
+  n.style.top  = (r.bottom-w.top+6)+"px";
+
+  $("#namerLb").textContent = mode==="add" ? "Name this variant" : "Rename variant";
+  $("#varOk").textContent   = mode==="add" ? "Add" : "Save";
+  $("#varName").value = mode==="add"
+    ? ""
+    : VARIANTS[idx].name;
+  $("#varName").placeholder = mode==="add"
+    ? `Variant ${VLAB(VARIANTS.length)}`
+    : "Variant name";
+  $("#varSugs").innerHTML = NAME_SUGS
+    .filter(s=>!VARIANTS.some(v=>v.name===s))
+    .slice(0,4).map(s=>`<button class="sug">${s}</button>`).join("");
+  document.querySelectorAll("#varSugs .sug").forEach(b=>{
+    b.addEventListener("click",()=>{ $("#varName").value=b.textContent; $("#varName").focus() });
+  });
+
+  n.classList.add("on");
+  setTimeout(()=>$("#varName").focus(),0);
+}
+function closeNamer(){ $("#namer").classList.remove("on") }
+
+function commitNamer(){
+  const raw=$("#varName").value.trim();
+  if(namerMode==="add"){
+    const name = raw || `Variant ${VLAB(VARIANTS.length)}`;
+    VARIANTS.push({ name, scenes: JSON.parse(JSON.stringify(SCENES)) });
+    closeNamer();
+    switchVariant(VARIANTS.length-1);
+  } else {
+    if(raw) VARIANTS[namerTarget].name = raw;
+    closeNamer(); paintVariants();
+  }
+}
+$("#varOk").addEventListener("click",commitNamer);
+$("#varCancel").addEventListener("click",closeNamer);
+$("#varName").addEventListener("keydown",e=>{
+  if(e.key==="Enter"){ e.preventDefault(); commitNamer() }
+  if(e.key==="Escape"){ closeNamer() }
+});
+document.addEventListener("click",e=>{
+  if(!e.target.closest("#namer") && !e.target.closest("#addVar") && !e.target.closest("[data-var]"))
+    closeNamer();
+});
+
+function switchVariant(i){
+  vi=i; SCENES=VARIANTS[i].scenes; sel=0;
+  paintVariants(); paintScenes(); paintLayoutPicker(); render();
+  if($("#s-preview").classList.contains("on")) resetPreview();
+}
+function delVariant(i){
+  if(VARIANTS.length<2) return;
+  VARIANTS.splice(i,1);
+  switchVariant(Math.max(0,Math.min(vi,VARIANTS.length-1)));
+}
+
+resetScenes(); paintVariants(); paintScenes(); paintLayoutPicker();
+
+/* ---- preview: plays the assembled clip, scene by scene ---- */
+let pT=0, pPlay=false, pRaf=null, pLast=0;
+
+const totalDur = () => SCENES.reduce((a,s)=>a+sceneDur(s),0);
+
+// which scene is on screen, and how far into it
+function sceneAt(t){
+  let acc=0;
+  for(let i=0;i<SCENES.length;i++){
+    const d=sceneDur(SCENES[i]);
+    if(t < acc+d || i===SCENES.length-1) return {i, local:t-acc, start:acc, d};
+    acc+=d;
+  }
+  return {i:0, local:0, start:0, d:0};
+}
+
+// Words live on the SOURCE timeline. Once scenes are reordered or lifted they
+// no longer describe the output, so remap them before rendering captions.
+// This is the same remap the render job has to do when generating the ASS file.
+function outputWords(){
+  const words=CLIP.split(" ");
+  const out=[]; let acc=0;
+  SCENES.forEach(s=>{
+    const d=sceneDur(s);
+    if(s.layout!=="card"){
+      words.forEach((w,i)=>{
+        const absS=IN+WT[i].s, absE=IN+WT[i].e;
+        if(absE>s.in && absS<s.out){
+          out.push({ w, s: acc+Math.max(0,absS-s.in), e: acc+Math.min(d,absE-s.in) });
+        }
+      });
+    }
+    acc+=d;
+  });
+  return out;
+}
+let OW=[];
+
+function paintTicks(){
+  const tot=totalDur();
+  $("#ticks").innerHTML = SCENES.map((s,i)=>
+    `<span class="tick" style="flex:${sceneDur(s)/tot}" data-t="${i}"><i></i></span>`).join("");
+}
+
+function renderPreview(){
+  const tot=totalDur(), cur=sceneAt(pT), s=SCENES[cur.i];
+
+  $("#vfCard").style.display = s.layout==="card" ? "flex" : "none";
+  const bot=$("#vfBot"), top=$("#vfTop");
+  if(s.layout==="split_product" || s.layout==="split_speakers"){
+    top.style.height=(s.ratio*100)+"%";
+    bot.style.display="flex"; bot.style.top=(s.ratio*100)+"%"; bot.style.bottom="0";
+    bot.style.background = s.layout==="split_product"
+      ? (ASSETS.find(a=>a.id===s.asset)||ASSETS[0]).g
+      : "linear-gradient(135deg,#3A4252,#6E7A8F)";
+  } else {
+    top.style.height="100%"; bot.style.display="none";
+  }
+
+  // captions from the remapped output timeline
+  const live=OW.filter(w=>pT>=w.s-1.2 && pT<w.e+0.4);
+  const lines=[]; for(let i=0;i<live.length;i+=S.wpl) lines.push(live.slice(i,i+S.wpl));
+  $("#cap3").innerHTML = lines.map(l=>`<div>${l.map(w=>{
+    const on = pT>=w.s && pT<w.e;
+    return `<b style="color:${on?S.hl:'#fff'}">${S.caps?w.w.toUpperCase():w.w}</b>`;
+  }).join(" ")}</div>`).join("");
+  $("#cap3").style.cssText += `
+    font-family:'Inter',sans-serif;font-weight:700;line-height:1.22;
+    font-size:${S.fs*0.5}px;color:#fff;top:${S.vp}%;transform:translateY(-50%);
+    text-shadow:${S.ol?`0 0 ${S.ol}px #000,0 0 ${S.ol}px #000`:'none'};
+    ${S.box?'background:rgba(0,0,0,.62);padding:4px 8px;border-radius:3px;':'background:none;'}`;
+
+  $("#pNow").textContent = clock(Math.min(pT,tot));
+  $("#pEnd").textContent = tot.toFixed(1);
+  $("#pScrub").value = Math.round(pT/tot*1000);
+  $("#pScene").textContent = `Scene ${cur.i+1} · ${LY_NAME[s.layout]}`;
+
+  document.querySelectorAll("#ticks .tick").forEach((el,i)=>{
+    el.dataset.on = i===cur.i ? "1" : "0";
+    el.firstChild.style.width = i<cur.i ? "100%" : i===cur.i ? (cur.local/cur.d*100)+"%" : "0";
+  });
+}
+
+function setPreviewPlaying(on){
+  pPlay=on;
+  $("#pIcon").innerHTML = on
+    ? '<rect x="2" y="1.5" width="3" height="9"/><rect x="7" y="1.5" width="3" height="9"/>'
+    : '<path d="M2 1l9 5-9 5z"/>';
+  if(on){ pLast=performance.now(); pRaf=requestAnimationFrame(pTick) }
+  else if(pRaf){ cancelAnimationFrame(pRaf); pRaf=null }
+}
+function pTick(ts){
+  if(!pPlay) return;
+  pT += (ts-pLast)/1000; pLast=ts;
+  if(pT>=totalDur()){ pT=totalDur(); setPreviewPlaying(false) }
+  renderPreview();
+  if(pPlay) pRaf=requestAnimationFrame(pTick);
+}
+function resetPreview(){
+  setPreviewPlaying(false); pT=0;
+  OW=outputWords(); paintTicks(); paintChecks(); renderPreview();
+}
+
+$("#pPlay").addEventListener("click",()=>{
+  if(!pPlay && pT>=totalDur()) pT=0;
+  setPreviewPlaying(!pPlay);
+});
+$("#pStop").addEventListener("click",()=>{ setPreviewPlaying(false); pT=0; renderPreview() });
+$("#pScrub").addEventListener("input",e=>{
+  pT=+e.target.value/1000*totalDur(); renderPreview();
+});
+
+function paintChecks(){
+  const tot=totalDur();
+  const hasCard=SCENES.some(s=>s.layout==="card");
+  const hasSplit=SCENES.some(s=>s.layout.startsWith("split"));
+  const flagged=LOADED.flag;
+  const sz=SAFE[typeof pRatio!=="undefined"?pRatio:"9x16"];
+  const topLim = sz.t, botLim = 100-sz.b;
+  // caption block occupies roughly 12% of height around its centre
+  const capTop=S.vp-6, capBot=S.vp+6;
+  const clash = capTop<topLim || capBot>botLim;
+  const rows=[
+    {s: tot>=8 && tot<=60 ? "ok":"warn", t:`Duration ${tot.toFixed(1)}s`,
+     p: tot>60 ? "Over 60s — trim for Reels placements" : tot<8 ? "Very short for a testing ad" : "Within range for Reels and Stories"},
+    {s: clash ? "warn":"ok", t:"Captions clear of UI",
+     p: clash ? `Caption sits at ${S.vp}% — overlaps the ${capBot>botLim?"bottom":"top"} safe zone at ${RATIOS[typeof pRatio!=="undefined"?pRatio:"9x16"].label}. Move it, or it will be covered.`
+              : `Caption at ${S.vp}% sits inside the safe band`},
+    {s:"ok", t:"Captions remapped", p:`${OW.length} words repositioned to the output timeline`},
+    {s: hasSplit ? "ok":"", t:"Product on screen", p: hasSplit ? "Split scene present" : "No product visible — consider a split or end card"},
+    {s: hasCard ? "ok":"", t:"End card", p: hasCard ? "Present" : "None added"},
+    {s: flagged ? "warn":"ok", t:"Compliance", p: flagged ? "Segment flagged for treatment claims — legal review before it runs" : "No claim flags on this segment"}
+  ];
+  $("#checks").innerHTML = rows.map(r=>`
+    <div class="chk" data-s="${r.s}"><span class="dotc"></span>
+      <span><strong style="font-weight:600">${r.t}</strong><p>${r.p}</p></span></div>`).join("");
+}
+
+/* ---- collapsible sidebar sections ---- */
+document.querySelectorAll(".acc").forEach(a=>{
+  const h=a.querySelector(".acc-h");
+  h.setAttribute("aria-expanded", a.dataset.open==="1");
+  h.addEventListener("click",()=>{
+    const open = a.dataset.open==="1" ? "0" : "1";
+    a.dataset.open=open;
+    h.setAttribute("aria-expanded", open==="1");
+  });
+});
+
+// collapsed headers still show what's set, so nothing is hidden blind
+function paintSummaries(){
+  const s=SCENES[sel];
+  const t=$("#sumTpl"), as=$("#sumAsset"), ly=$("#sumLayout"), su=$("#sumSubs");
+  if(t){
+    const on=[...document.querySelectorAll("#templates .chip")].find(c=>c.dataset.on==="1");
+    t.textContent = on ? on.textContent.trim() : "";
+  }
+  if(as) as.textContent = ASSETS.length+" in library";
+  if(ly && s){
+    const bits=[LY_NAME[s.layout]];
+    if(s.layout.startsWith("split")) bits.push(`${Math.round(s.ratio*100)}/${Math.round((1-s.ratio)*100)}`);
+    ly.textContent = bits.join(" · ");
+  }
+  if(su){
+    const p=[...document.querySelectorAll("#presets .chip")].find(c=>c.dataset.on==="1");
+    su.textContent = `${p?p.textContent.trim():"Custom"} · ${S.fs}px`;
+  }
+}
+
+/* ---- asset import into the builder ---- */
+function paintImport(){
+  $("#impStrip").innerHTML =
+    `<button class="it-up" id="impUp" title="Upload an asset"><b>+</b>Upload</button>` +
+    ASSETS.map(a=>`
+      <button class="it" data-imp="${a.id}" title="${a.name}">
+        <span class="sq" style="background:${a.g}"></span>
+        <span class="nm">${a.name.split(" — ")[0]}</span>
+      </button>`).join("");
+
+  document.querySelectorAll("#impStrip [data-imp]").forEach(b=>{
+    b.addEventListener("click",()=>{
+      const s=SCENES[sel]; if(!s) return;
+      const a=ASSETS.find(x=>x.id===b.dataset.imp);
+      s.asset=a.id;
+      // dropping an asset onto a full-frame scene implies a layout
+      if(s.layout==="full") s.layout = a.kind==="End card" ? "card" : "split_product";
+      if(s.layout==="card" && !s.dur) s.dur=2.5;
+      if(s.layout==="split_product" && s.ratio===0.5) s.ratio=0.6;
+      paintScenes(); paintLayoutPicker(); render();
+    });
+  });
+  $("#impUp").addEventListener("click",()=>{
+    const n=ASSETS.length+1;
+    const a={id:"u"+n, name:"Uploaded asset "+n, kind:"Product still",
+             g:"linear-gradient(150deg,#A8B6C2,#D6E0E6)"};
+    ASSETS.push(a);
+    $("#slot").innerHTML = ASSETS.filter(x=>x.kind!=="Logo")
+      .map(x=>`<option value="${x.id}">${x.name}</option>`).join("");
+    $("#assetGrid").innerHTML = ASSETS.map(x=>`
+      <div class="ass"><div class="sq" style="background:${x.g}"><span>1:1</span></div>
+      <div class="nm">${x.name}</div><div class="kd">${x.kind}</div></div>`).join("");
+    paintImport();
+    paintSummaries();
+    fakeUpload(a.name.toLowerCase().replace(/ /g,"-")+".png");
+  });
+}
+paintImport();
+
+/* ---- preview ratio + safe zones ---- */
+let pRatio="9x16";
+document.querySelectorAll("#ratioSeg button").forEach(b=>{
+  b.addEventListener("click",()=>{
+    document.querySelectorAll("#ratioSeg button").forEach(o=>o.dataset.on="0");
+    b.dataset.on="1";
+    pRatio=b.dataset.ratio;
+    const vf=$("#vframe"), R=RATIOS[pRatio], sz=SAFE[pRatio];
+    vf.classList.remove("r45","r11","r1911");
+    if(pRatio==="4x5")    vf.classList.add("r45");
+    if(pRatio==="1x1")    vf.classList.add("r11");
+    if(pRatio==="1.91x1") vf.classList.add("r1911");
+    $("#zRight").style.display = sz.r ? "" : "none";
+    $("#zRight").style.width = sz.r+"%";
+    vf.querySelector(".zone.t").style.height = sz.t+"%";
+    vf.querySelector(".zone.b").style.height = sz.b+"%";
+    $("#zTop").textContent = sz.note;
+    $("#zBot").textContent = sz.noteB;
+    $("#ratioNote").textContent = `${R.use} · ${R.px}`;
+    paintChecks(); renderPreview();
+  });
+});
+$("#zoneTog").addEventListener("change",e=>{
+  $("#vframe").classList.toggle("zones", e.target.checked);
+});
+
+// Push is not atomic: variants that succeed stay created, failures are
+// isolated and retried individually. Two distinct failure kinds —
+// upload/processing (retryable) and ad review rejection (needs a creative fix).
+const PUSH_STATE = {};   // variant index -> state
+
+function seedPushStates(){
+  VARIANTS.forEach((v,i)=>{
+    if(PUSH_STATE[i]) return;
+    PUSH_STATE[i] = i===2 ? {s:"failed",   why:"Video processing timed out at Meta after 3 attempts. The source file is fine — retry usually clears it."}
+                  : i===3 ? {s:"rejected", why:"Rejected under Health & Wellness policy: implied treatment outcome in the opening line. Edit the hook or route to legal review."}
+                  : i===1 ? {s:"review",   why:null}
+                  :         {s:"created",  why:null};
+  });
+}
+
+function paintPush(){
+  const host=$("#pushList"); if(!host) return;
+  if(SEND_FROM_QUEUE.length){ paintPushFromQueue(); return }
+  seedPushStates();
+
+  const lib = (typeof SEND_MODE!=="undefined" && SEND_MODE==="lib");
+  const BADGE={
+    created: lib ? '<span class="status rev">UPLOADED</span>'
+                 : '<span class="status paused">PAUSED</span>',
+    review: lib ? '<span class="status rev">UPLOADED</span>'
+                : '<span class="status rev">IN REVIEW</span>',
+    failed:'<span class="status fail">FAILED</span>',
+    rejected:'<span class="status rej">REJECTED</span>',
+    queued:'<span class="tag">queued</span>'
+  };
+  const ok = VARIANTS.filter((_,i)=>["created","review"].includes(PUSH_STATE[i].s)).length;
+  const bad = VARIANTS.length - ok;
+
+  const rows = VARIANTS.map((v,i)=>{
+    const st=PUSH_STATE[i].s, why=PUSH_STATE[i].why;
+    const dur = v.scenes.reduce((a,s)=>a+sceneDur(s),0) || (OUT-IN);
+    const hasCard = v.scenes.some(s=>s.layout==="card");
+    const hasSplit= v.scenes.some(s=>s.layout.startsWith("split"));
+    return `<div class="pushrow" data-s="${st}">
+      <span class="th">${hasSplit?'<b></b>':''}${hasCard?'<u style="display:block"></u>':''}</span>
+      <span class="meta">
+        <div class="nm">${lib && $("#libTag") ? $("#libTag").value : `KLR_POD_barrier_c0${LOADED.rank}`}_${VLAB(i)}_${slug(v.name)}</div>
+        <div class="sp">${v.name} · ${dur.toFixed(1)}s · ${v.scenes.length} scene${v.scenes.length>1?"s":""}</div>
+        ${lib?"":`<div class="sp mono" style="font-size:9.5px;color:var(--faint);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${typeof utmFor==="function"?utmFor(i):""}</div>`}
+        ${why?`<div class="why">${why}</div>`:""}
+      </span>
+      <span class="st">
+        ${BADGE[st]}
+        ${st==="failed"?`<button class="btn ghost sm" data-retry="${i}">Retry</button>`:""}
+        ${st==="rejected"?`<button class="btn ghost sm" data-fix="${i}">Edit hook</button>`:""}
+      </span>
+    </div>`;
+  }).join("");
+
+  host.innerHTML = `
+    <div class="batch">
+      <span class="cnt">${ok} of ${VARIANTS.length} ${lib?"uploaded":"created"} <em>${bad?`· ${bad} need${bad>1?"":"s"} attention`:"· all clear"}</em></span>
+      ${bad?'<button class="btn ghost sm" id="retryAll">Retry all failed</button>':''}
+    </div>${rows}`;
+
+  document.querySelectorAll("#pushList [data-retry]").forEach(b=>{
+    b.addEventListener("click",()=>{
+      const i=+b.dataset.retry;
+      PUSH_STATE[i]={s:"queued",why:null}; paintPush();
+      setTimeout(()=>{ PUSH_STATE[i]={s:"review",why:null}; paintPush() },1400);
+    });
+  });
+  document.querySelectorAll("#pushList [data-fix]").forEach(b=>{
+    b.addEventListener("click",()=>{ switchVariant(+b.dataset.fix); go("build") });
+  });
+  const ra=$("#retryAll");
+  if(ra) ra.addEventListener("click",()=>{
+    VARIANTS.forEach((_,i)=>{ if(PUSH_STATE[i].s==="failed") PUSH_STATE[i]={s:"queued",why:null} });
+    paintPush();
+    setTimeout(()=>{
+      VARIANTS.forEach((_,i)=>{ if(PUSH_STATE[i].s==="queued") PUSH_STATE[i]={s:"review",why:null} });
+      paintPush();
+    },1400);
+  });
+}
+
+/* ---- approval gate ---- */
+let APPROVED=false;
+$("#approveBtn").addEventListener("click",()=>{
+  APPROVED=true;
+  submitToQueue();
+  $("#approveState").style.display="none";
+  $("#approvedState").style.display="";
+  $("#approvedLbl").textContent =
+    `${VARIANTS.length} variant${VARIANTS.length>1?"s":""} submitted`;
+});
+function resetApproval(){
+  APPROVED=false;
+  $("#approveState").style.display="";
+  $("#approvedState").style.display="none";
+}
+
+/* ---- Meta destination ---- */
+const CAMPAIGNS=[
+  {id:"c1", name:"Klira — Prospecting (Conversions)", sets:[
+    {id:"as1", name:"Creative testing — BAU", meta:"£120/day · UK 25-54 · Advantage+ placements"},
+    {id:"as2", name:"Broad — no interest", meta:"£300/day · UK 18-65 · Advantage+ placements"}
+  ]},
+  {id:"c2", name:"Klira — Retargeting", sets:[
+    {id:"as3", name:"Site visitors 30d", meta:"£75/day · Custom audience · Feed + Reels"}
+  ]},
+  {id:"c3", name:"Klira — Always-on brand", sets:[
+    {id:"as4", name:"Creative testing — Brand", meta:"£60/day · UK broad · Reels only"}
+  ]}
+];
+function paintCampaigns(){
+  $("#camp").innerHTML = CAMPAIGNS.map(c=>`<option value="${c.id}">${c.name}</option>`).join("");
+  paintAdsets();
+}
+function paintAdsets(){
+  const c=CAMPAIGNS.find(x=>x.id===$("#camp").value)||CAMPAIGNS[0];
+  $("#adset").innerHTML = c.sets.map(s=>`<option value="${s.id}">${s.name}</option>`).join("");
+  paintAdsetMeta();
+}
+function paintAdsetMeta(){
+  const c=CAMPAIGNS.find(x=>x.id===$("#camp").value)||CAMPAIGNS[0];
+  const s=c.sets.find(x=>x.id===$("#adset").value)||c.sets[0];
+  $("#adsetMeta").textContent = s.meta;
+}
+$("#camp").addEventListener("change",()=>{ paintAdsets(); paintUtm() });
+$("#adset").addEventListener("change",()=>{ paintAdsetMeta(); paintUtm() });
+paintCampaigns();
+
+function utmFor(i){
+  const base=$("#lp").value.trim();
+  if(!$("#utmOn").checked) return base;
+  const q=new URLSearchParams({
+    utm_source:$("#utmSrc").value.trim(),
+    utm_medium:$("#utmMed").value.trim(),
+    utm_campaign:$("#utmCamp").value.trim(),
+    utm_content:`${VLAB(i).toLowerCase()}_${slug(VARIANTS[i].name)}`
+  });
+  return base+(base.includes("?")?"&":"?")+q.toString();
+}
+function paintUtm(){
+  const w=$("#utmWrap"); if(!w) return;
+  w.style.display = $("#utmOn").checked ? "" : "none";
+  const p=$("#utmPreview");
+  if(p) p.textContent = VARIANTS.map((_,i)=>utmFor(i)).join("\n");
+  paintPush();
+}
+["#lp","#utmSrc","#utmMed","#utmCamp"].forEach(sel=>{
+  $(sel).addEventListener("input",paintUtm);
+});
+$("#utmOn").addEventListener("change",paintUtm);
+$("#libTag").addEventListener("input",()=>paintPush());
+
+/* ---- send mode: full ads vs media library only ---- */
+let SEND_MODE="ads";
+const MODE_NOTE={
+  ads:"Builds a full ad per variant in the chosen ad set, paused. Goes through Meta ad review.",
+  lib:"Uploads the videos only. No ad is created, so there is no review and nothing can be rejected."
+};
+function applyMode(){
+  const lib = SEND_MODE==="lib";
+  $("#adOnly").style.display = lib ? "none" : "";
+  $("#libOnly").style.display = lib ? "" : "none";
+  $("#modeNote").textContent = MODE_NOTE[SEND_MODE];
+  $("#destCard").querySelector(".eyebrow").textContent = lib ? "Media library" : "Destination";
+
+  // library uploads skip creative build and ad review entirely
+  const steps=document.querySelectorAll("#s-push .step");
+  if(steps.length>=4){
+    steps[2].style.display = lib ? "none" : "";
+    steps[3].querySelector("h4").textContent = lib ? "Added to media library" : "Ads created, paused";
+    steps[3].querySelector("p").textContent  = lib
+      ? "Available in Ads Manager. No ad exists yet, so nothing is in review."
+      : "One ad per variant, same ad set. Failures are isolated — successful variants stay created.";
+  }
+  // rejection is impossible without an ad, so clear that state on switch
+  if(lib) VARIANTS.forEach((_,i)=>{
+    if(PUSH_STATE[i] && PUSH_STATE[i].s==="rejected") PUSH_STATE[i]={s:"created",why:null};
+  });
+  const rn=$("#rejNote");
+  if(rn) rn.style.display = lib ? "none" : "";
+  paintPush();
+}
+document.querySelectorAll("#modeSeg button").forEach(b=>{
+  b.addEventListener("click",()=>{
+    document.querySelectorAll("#modeSeg button").forEach(o=>o.dataset.on="0");
+    b.dataset.on="1"; SEND_MODE=b.dataset.mode; applyMode();
+  });
+});
+
+/* ---- review queue ----
+   Rows are individual ads-to-be. Flow mirrors invoice approval:
+   submitted → in review → approved → sent. Approval is a separate step
+   from building, because for prescription claims the reviewer often isn't
+   the person who cut the clip. */
+let QUEUE=[
+  {id:1, name:"KLR_POD_barrier_c02_A_control",        src:"Barrier repair — cut 2", dur:24.8, scenes:2, by:"Ryham",  when:"6 Aug", st:"review"},
+  {id:2, name:"KLR_POD_barrier_c02_B_question-open",  src:"Barrier repair — cut 2", dur:26.1, scenes:3, by:"Ryham",  when:"6 Aug", st:"review"},
+  {id:3, name:"KLR_LIVE_purge_c01_A_control",         src:"Live Q&A — cut 1",       dur:19.4, scenes:1, by:"Millie", when:"5 Aug", st:"review"},
+  {id:4, name:"KLR_LIVE_purge_c01_B_emotional-hook",  src:"Live Q&A — cut 1",       dur:22.0, scenes:3, by:"Millie", when:"5 Aug", st:"approved"},
+  {id:5, name:"KLR_POD_barrier_c03_A_control",        src:"Barrier repair — cut 3", dur:31.5, scenes:2, by:"Ryham",  when:"4 Aug", st:"approved"},
+  {id:6, name:"KLR_POD_barrier_c01_A_control",        src:"Barrier repair — cut 1", dur:27.6, scenes:2, by:"Ryham",  when:"1 Aug", st:"sent", meta:"PAUSED"},
+  {id:7, name:"KLR_POD_barrier_c01_B_derm-open",      src:"Barrier repair — cut 1", dur:29.2, scenes:3, by:"Ryham",  when:"1 Aug", st:"sent", meta:"REJECTED"}
+];
+let qTab="review", qSel=new Set(), qId=100;
+
+function qCounts(){
+  return {
+    review:   QUEUE.filter(r=>r.st==="review").length,
+    approved: QUEUE.filter(r=>r.st==="approved").length,
+    sent:     QUEUE.filter(r=>r.st==="sent").length
+  };
+}
+function paintQueueTabs(){
+  const c=qCounts();
+  $("#nReview").textContent=c.review;
+  $("#nApproved").textContent=c.approved;
+  $("#nSent").textContent=c.sent;
+  document.querySelectorAll(".qtab").forEach(t=>t.dataset.on = t.dataset.q===qTab?"1":"0");
+}
+function paintQueue(){
+  paintQueueTabs();
+  const rows=QUEUE.filter(r=>r.st===qTab);
+  const wrap=$("#qTableWrap");
+
+  if(!rows.length){
+    wrap.innerHTML=`<div class="qempty">Nothing ${qTab==="review"?"waiting for review":qTab==="approved"?"approved yet":"sent yet"}.</div>`;
+    paintBulk(); paintQFoot(); return;
+  }
+
+  const allSel = rows.every(r=>qSel.has(r.id));
+  wrap.innerHTML=`
+    <table class="q">
+      <thead><tr>
+        <th class="cb"><input type="checkbox" id="qAll" ${allSel?"checked":""} aria-label="Select all"></th>
+        <th></th><th>Creative</th><th>Source</th>
+        <th style="text-align:right">Length</th><th style="text-align:right">Scenes</th>
+        <th>Built by</th>${qTab==="sent"?"<th>Meta</th>":""}
+      </tr></thead>
+      <tbody>${rows.map(r=>`
+        <tr data-row="${r.id}" class="${qSel.has(r.id)?"sel":""}">
+          <td class="cb"><input type="checkbox" data-cb="${r.id}" ${qSel.has(r.id)?"checked":""} aria-label="Select ${r.name}"></td>
+          <td><span class="qth">${r.scenes>1?"<b></b>":""}</span></td>
+          <td><div class="nm">${r.name}</div><div class="sub">${r.when}</div></td>
+          <td>${r.src}</td>
+          <td class="num">${r.dur.toFixed(1)}s</td>
+          <td class="num">${r.scenes}</td>
+          <td>${r.by}</td>
+          ${qTab==="sent"?`<td><span class="status ${r.meta==="REJECTED"?"rej":"paused"}">${r.meta}</span></td>`:""}
+        </tr>`).join("")}
+      </tbody>
+    </table>`;
+
+  $("#qAll").addEventListener("change",e=>{
+    rows.forEach(r=> e.target.checked ? qSel.add(r.id) : qSel.delete(r.id));
+    paintQueue();
+  });
+  document.querySelectorAll("[data-cb]").forEach(cb=>{
+    cb.addEventListener("change",e=>{
+      const id=+cb.dataset.cb;
+      e.target.checked ? qSel.add(id) : qSel.delete(id);
+      paintQueue();
+    });
+  });
+  document.querySelectorAll("#qTableWrap tr[data-row]").forEach(tr=>{
+    tr.addEventListener("click",e=>{
+      if(e.target.closest("input")) return;
+      const id=+tr.dataset.row;
+      qSel.has(id) ? qSel.delete(id) : qSel.add(id);
+      paintQueue();
+    });
+  });
+  paintBulk(); paintQFoot();
+}
+function paintQFoot(){
+  const c=qCounts();
+  $("#qFoot").textContent = qTab==="sent"
+    ? "Sent creatives are read-only. Meta review status updates automatically."
+    : qTab==="approved"
+      ? `${c.approved} approved and waiting to be sent. Select rows to push them in one batch.`
+      : `${c.review} waiting on review. Approving does not send anything — approved items move to the next tab.`;
+}
+function paintBulk(){
+  const rows=QUEUE.filter(r=>r.st===qTab);
+  const n=rows.filter(r=>qSel.has(r.id)).length;
+  const bar=$("#bulkBar");
+  bar.classList.toggle("on", n>0);
+  if(!n) return;
+  $("#bulkCount").textContent=`${n} selected`;
+  $("#bulkActions").innerHTML =
+    qTab==="review"   ? `<button id="bReject">Send back</button> <button class="go" id="bApprove">Approve</button>`
+  : qTab==="approved" ? `<button id="bUnapprove">Move back to review</button> <button class="go" id="bSend">Send to Meta</button>`
+  : `<button id="bClear">Clear selection</button>`;
+
+  const on=(id,fn)=>{const el=$(id); if(el) el.addEventListener("click",fn)};
+  on("#bApprove",()=>{ moveSel("approved"); qTab="approved"; paintQueue() });
+  on("#bReject", ()=>{ QUEUE=QUEUE.filter(r=>!qSel.has(r.id)); qSel.clear(); paintQueue() });
+  on("#bUnapprove",()=>{ moveSel("review"); paintQueue() });
+  on("#bSend",()=>{ SEND_FROM_QUEUE=[...qSel]; go("push") });
+  on("#bClear",()=>{ qSel.clear(); paintQueue() });
+}
+function moveSel(st){
+  QUEUE.forEach(r=>{ if(qSel.has(r.id)) r.st=st });
+  qSel.clear();
+}
+document.querySelectorAll(".qtab").forEach(t=>{
+  t.addEventListener("click",()=>{ qTab=t.dataset.q; qSel.clear(); paintQueue() });
+});
+
+let SEND_FROM_QUEUE=[];
+
+// submitting from preview drops the current variants into the queue
+function submitToQueue(){
+  VARIANTS.forEach((v,i)=>{
+    QUEUE.unshift({
+      id:++qId,
+      name:`KLR_POD_barrier_c0${LOADED.rank}_${VLAB(i)}_${slug(v.name)}`,
+      src:`Barrier repair — cut ${LOADED.rank}`,
+      dur:v.scenes.reduce((a,s)=>a+sceneDur(s),0) || (OUT-IN),
+      scenes:v.scenes.length,
+      by:"Ryham", when:"11 Aug", st:"review"
+    });
+  });
+  qTab="review"; qSel.clear();
+}
+
+// Sending a batch selected in the queue rather than the current builder session
+function paintPushFromQueue(){
+  const host=$("#pushList");
+  const rows=QUEUE.filter(r=>SEND_FROM_QUEUE.includes(r.id));
+  const lib=(typeof SEND_MODE!=="undefined" && SEND_MODE==="lib");
+  host.innerHTML=`
+    <div class="batch">
+      <span class="cnt">${rows.length} approved creative${rows.length>1?"s":""} <em>· from the review queue</em></span>
+      <button class="btn ghost sm" id="clearBatch">Use current build instead</button>
+    </div>` + rows.map(r=>`
+    <div class="pushrow" data-s="queued">
+      <span class="th">${r.scenes>1?'<b></b>':''}</span>
+      <span class="meta">
+        <div class="nm">${r.name}</div>
+        <div class="sp">${r.src} · ${r.dur.toFixed(1)}s · ${r.scenes} scene${r.scenes>1?"s":""}</div>
+        ${lib?"":`<div class="sp mono" style="font-size:9.5px;color:var(--faint);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${$("#lp")?$("#lp").value:""}</div>`}
+      </span>
+      <span class="st"><span class="tag">ready</span></span>
+    </div>`).join("") + `
+    <div style="margin-top:12px">
+      <button class="btn signal" style="width:100%" id="doSend">
+        ${lib?"Upload":"Create"} ${rows.length} ${lib?"to media library":"paused ad"+(rows.length>1?"s":"")}
+      </button>
+    </div>`;
+
+  $("#clearBatch").addEventListener("click",()=>{ SEND_FROM_QUEUE=[]; paintPush() });
+  $("#doSend").addEventListener("click",()=>{
+    QUEUE.forEach(r=>{
+      if(SEND_FROM_QUEUE.includes(r.id)){ r.st="sent"; r.meta = lib ? "UPLOADED" : "PAUSED" }
+    });
+    SEND_FROM_QUEUE=[]; qTab="sent"; qSel.clear();
+    go("queue");
+  });
+}
+
+/* ---- filmstrip trim ---- */
+const MIN_CLIP = 3;
+function ctxRange(){
+  return [Math.max(0, LOADED.s-8), Math.min(DUR, LOADED.e+8)];
+}
+function buildFrames(){
+  const [a,b]=ctxRange();
+  let h="";
+  for(let i=0;i<16;i++){
+    const t=a+(b-a)*(i/16);
+    const inShot = t>=LOADED.s && t<=LOADED.e;
+    const l = 26 + Math.sin(i*1.7)*7 + (inShot?10:0);
+    h+=`<i style="background:linear-gradient(150deg,hsl(218 18% ${l}%),hsl(212 16% ${l+16}%))"></i>`;
+  }
+  $("#frames").innerHTML=h;
+  $("#ctx0").textContent=mmss(a);
+  $("#ctx1").textContent=mmss(b);
+}
+function paintStrip(){
+  const [a,b]=ctxRange(), span=b-a;
+  const l=(IN-a)/span*100, r=(OUT-a)/span*100;
+  $("#win").style.left=l+"%"; $("#win").style.width=(r-l)+"%";
+  $("#maskL").style.width=l+"%";
+  $("#maskR").style.width=(100-r)+"%";
+  $("#stripPh").style.left=((IN+Math.min(T,clipDur())-a)/span*100)+"%";
+}
+function paintTrim(){
+  const d=clipDur();
+  $("#tin").value=fmt(IN); $("#tout").value=fmt(OUT); $("#tdur").textContent=d.toFixed(1)+"s";
+  $("#tcEnd").textContent=d.toFixed(1);
+}
+
+(function handleDrag(){
+  const strip=$("#strip");
+  let mode=null;
+  function timeAt(clientX){
+    const [a,b]=ctxRange(), r=strip.getBoundingClientRect();
+    return a + Math.max(0,Math.min(1,(clientX-r.left)/r.width))*(b-a);
+  }
+  [["#hL","l"],["#hR","r"]].forEach(([sel,m])=>{
+    $(sel).addEventListener("pointerdown",e=>{
+      mode=m; $(sel).setPointerCapture(e.pointerId); e.preventDefault(); e.stopPropagation();
+    });
+    $(sel).addEventListener("pointermove",e=>{
+      if(mode!==m) return;
+      const t=timeAt(e.clientX);
+      if(m==="l") IN=Math.min(t, OUT-MIN_CLIP); else OUT=Math.max(t, IN+MIN_CLIP);
+      T=Math.min(T, clipDur());
+      if(SCENES.length){ SCENES[0].in=IN; SCENES[SCENES.length-1].out=OUT; }
+      WT=wordTimes(); active=activeIndex();
+      paintTrim(); paintStrip(); paintScenes(); render(); syncTransport();
+    });
+    const end=e=>{ mode=null; try{$(sel).releasePointerCapture(e.pointerId)}catch(_){} };
+    $(sel).addEventListener("pointerup",end);
+    $(sel).addEventListener("pointercancel",end);
+  });
+  // tap the strip to scrub
+  strip.addEventListener("pointerdown",e=>{
+    if(e.target.closest(".hnd")) return;
+    const t=timeAt(e.clientX);
+    T=Math.max(0,Math.min(clipDur(), t-IN));
+    active=activeIndex(); render(); syncTransport(); paintStrip();
+  });
+})();
+
+/* ---- transport ---- */
+let T=0, playing=false, rate=1, raf=null, lastTs=0;
+
+const clipDur = () => OUT - IN;
+
+// distribute word timings across the clip, weighted by word length
+function wordTimes(){
+  const w = CLIP.split(" ");
+  const weight = w.map(x=>x.replace(/[^\w']/g,"").length + 2);
+  const total = weight.reduce((a,b)=>a+b,0);
+  const d = clipDur();
+  let acc=0;
+  return w.map((_,i)=>{
+    const s = acc/total*d; acc += weight[i];
+    return { s, e: acc/total*d };
+  });
+}
+let WT = wordTimes();
+
+function activeIndex(){
+  for(let i=0;i<WT.length;i++){ if(T >= WT[i].s && T < WT[i].e) return i }
+  return T >= clipDur() ? WT.length-1 : 0;
+}
+
+const clock = t => `${String(Math.floor(t/60)).padStart(2,"0")}:${(t%60).toFixed(1).padStart(4,"0")}`;
+
+function syncTransport(){
+  const d = clipDur();
+  $("#tcNow").textContent = clock(Math.min(T,d));
+  $("#tcEnd").textContent = d.toFixed(1);
+  $("#scrub").value = Math.round(T/d*1000);
+  setPlayhead(IN + Math.min(T,d));
+  paintStrip();
+}
+
+function setPlaying(on){
+  playing = on;
+  $("#playIcon").innerHTML = on
+    ? '<rect x="2" y="1.5" width="3" height="9"/><rect x="7" y="1.5" width="3" height="9"/>'
+    : '<path d="M2 1l9 5-9 5z"/>';
+  $("#playBtn").setAttribute("aria-label", on ? "Pause" : "Play");
+  if(on){ lastTs = performance.now(); raf = requestAnimationFrame(tick) }
+  else if(raf){ cancelAnimationFrame(raf); raf=null }
+}
+
+function tick(ts){
+  if(!playing) return;
+  T += (ts - lastTs)/1000 * rate;
+  lastTs = ts;
+  if(T >= clipDur()){ T = clipDur(); setPlaying(false) }
+  active = activeIndex();
+  render(); syncTransport();
+  if(playing) raf = requestAnimationFrame(tick);
+}
+
+$("#playBtn").addEventListener("click",()=>{
+  if(!playing && T >= clipDur()) T = 0;
+  setPlaying(!playing);
+});
+$("#stopBtn").addEventListener("click",()=>{
+  setPlaying(false); T = 0; active = 0; render(); syncTransport();
+});
+$("#scrub").addEventListener("input",e=>{
+  T = +e.target.value/1000 * clipDur();
+  active = activeIndex(); render(); syncTransport();
+});
+document.querySelectorAll("#speeds .spd").forEach(b=>{
+  b.addEventListener("click",()=>{
+    document.querySelectorAll("#speeds .spd").forEach(o=>o.dataset.on="0");
+    b.dataset.on="1"; rate = +b.dataset.r;
+  });
+});
+
+// space toggles playback while the builder is open
+document.addEventListener("keydown",e=>{
+  if(e.code!=="Space") return;
+  if(!$("#s-build").classList.contains("on")) return;
+  if(/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(document.activeElement.tagName)) return;
+  e.preventDefault();
+  if(!playing && T >= clipDur()) T = 0;
+  setPlaying(!playing);
+});
+
+buildFrames(); paintTrim(); paintStrip();
+syncTransport();
+render();
+</script>
