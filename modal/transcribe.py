@@ -42,8 +42,37 @@ app = modal.App("airtomic-transcribe")
 def _download_models() -> None:
     """Bake model weights into the image at build time (see CLAUDE.md known
     traps) — otherwise every cold start re-downloads several GB."""
+    import hashlib
+    import subprocess
+    import sys
+    import tempfile
+    import zipfile
+
+    import torch
     import whisperx
     from pyannote.audio import Pipeline
+
+    # whisperx 3.1.5 fetches its VAD model from a hardcoded S3 bucket that no
+    # longer exists (returns 301, no followable Location). The byte-identical
+    # file — same sha256 that whisperx's loader verifies — ships inside the
+    # official whisperx 3.8.1 wheel, so lift it from there into the cache
+    # path load_vad_model checks first, and no download is ever attempted.
+    vad_sha256 = "0b5b3216d60a2d32fc086b47ea8c67589aaeb26b7e07fcbe620d6d0b83e209ea"
+    vad_fp = os.path.join(torch.hub._get_torch_home(), "whisperx-vad-segmentation.bin")
+    os.makedirs(os.path.dirname(vad_fp), exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "download", "-q", "--no-deps",
+             "whisperx==3.8.1", "-d", tmp],
+            check=True,
+        )
+        wheel = next(p for p in os.listdir(tmp) if p.endswith(".whl"))
+        with zipfile.ZipFile(os.path.join(tmp, wheel)) as zf:
+            vad_bytes = zf.read("whisperx/assets/pytorch_model.bin")
+    if hashlib.sha256(vad_bytes).hexdigest() != vad_sha256:
+        raise RuntimeError("VAD weights from whisperx 3.8.1 wheel failed hash check")
+    with open(vad_fp, "wb") as f:
+        f.write(vad_bytes)
 
     device = "cpu"  # build machines have no GPU; weights are device-agnostic
     whisperx.load_model(WHISPER_MODEL, device, compute_type="int8")
@@ -71,10 +100,34 @@ gpu_image = (
         "libswscale-dev",
         "libswresample-dev",
     )
+    # The ML chain is fully pinned. Leave one member loose and pip's
+    # newest-of-everything resolution picks combinations that break at
+    # runtime (this has already happened once — torchaudio 2.11 dropped
+    # set_audio_backend). Verified working together on Python 3.11.
+    #  - torch/torchaudio 2.1.2: pyannote.audio 3.1.1 calls
+    #    torchaudio.set_audio_backend, which modern torchaudio removed;
+    #    2.1.2 is contemporary with pyannote 3.1.1 (Dec 2023) and still has
+    #    the pre-removal audio-backend API. The default PyPI wheel is the
+    #    cu121 build, which covers the A10G (sm_86).
+    #  - ctranslate2 4.4.0: last release linked against cuDNN 8, which is
+    #    what torch 2.1.2 bundles. 4.5+ needs cuDNN 9 and fails on GPU at
+    #    runtime — no build-time check catches that one.
+    #  - numpy 1.26.4: numpy 2.x breaks extensions compiled against 1.x.
+    #  - faster-whisper / pyannote.audio: whisperx 3.1.5 pins both exactly;
+    #    repeated here so nothing can shift them silently.
     # 3.1.5 keeps whisperx.DiarizationPipeline at the top level; newer
     # releases moved it and changed pyannote pins — retest diarisation
-    # before bumping.
-    .pip_install("whisperx==3.1.5", "requests>=2.31")
+    # before bumping anything here.
+    .pip_install(
+        "torch==2.1.2",
+        "torchaudio==2.1.2",
+        "numpy==1.26.4",
+        "ctranslate2==4.4.0",
+        "faster-whisper==1.0.1",
+        "pyannote.audio==3.1.1",
+        "whisperx==3.1.5",
+        "requests>=2.31",
+    )
     # HF_HOME must match between build and runtime or the bake is useless.
     .env({"HF_HOME": MODELS_DIR})
     .run_function(_download_models, secrets=[modal.Secret.from_name("huggingface")])
