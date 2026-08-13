@@ -57,7 +57,20 @@ def _download_models() -> None:
 
 gpu_image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("ffmpeg")
+    # ffmpeg is needed at runtime (whisperx.load_audio shells out to it).
+    # The rest exist because faster-whisper pins av==11.*, which has no
+    # wheel and builds PyAV from source against the ffmpeg headers.
+    .apt_install(
+        "ffmpeg",
+        "pkg-config",
+        "libavformat-dev",
+        "libavcodec-dev",
+        "libavdevice-dev",
+        "libavutil-dev",
+        "libavfilter-dev",
+        "libswscale-dev",
+        "libswresample-dev",
+    )
     # 3.1.5 keeps whisperx.DiarizationPipeline at the top level; newer
     # releases moved it and changed pyannote pins — retest diarisation
     # before bumping.
