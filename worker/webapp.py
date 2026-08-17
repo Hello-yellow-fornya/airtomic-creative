@@ -10,7 +10,10 @@ ingest. The R2 bucket needs a CORS rule allowing PUT from this origin with
 the ETag header exposed — see README.
 
 GET /kf/<scene_id> 302-redirects to a short-lived presigned URL for that
-scene's keyframe — raw footage never sits on public URLs.
+scene's keyframe — raw footage never sits on public URLs. /media/<video_id>,
+/asset/<asset_id> and /export/<variant_id>/<ratio> do the same for source
+video, brand assets and rendered exports, so the web app can play real
+footage without R2 credentials of its own.
 
 Every request must carry the shared token: open /?key=<INGEST_TOKEN>.
 The token gates queueing work and media access. Unset INGEST_TOKEN disables
@@ -207,6 +210,33 @@ def make_server(cfg: Config) -> ThreadingHTTPServer:
                 })
                 return
 
+            # Source video presign — the builder's <video> element points at
+            # the web app's proxy, which 302s here, which 303s to R2.
+            m = re.fullmatch(r"/media/([0-9a-f-]{36})", url.path)
+            if m:
+                self._presign_lookup(
+                    key,
+                    "SELECT storage_uri AS uri FROM videos WHERE id = %s",
+                    (m.group(1),),
+                )
+                return
+
+            m = re.fullmatch(r"/asset/([0-9a-f-]{36})", url.path)
+            if m:
+                self._presign_lookup(
+                    key,
+                    "SELECT storage_uri AS uri FROM assets WHERE id = %s",
+                    (m.group(1),),
+                )
+                return
+
+            m = re.fullmatch(r"/export/([0-9a-f-]{36})/([0-9a-z.]+)", url.path)
+            if m:
+                # export_uri on the variant is the LAST render; a specific
+                # ratio lives at the conventional key exports/{id}/{ratio}.mp4
+                self._presign_key(key, f"exports/{m.group(1)}/{m.group(2)}.mp4")
+                return
+
             if url.path != "/":
                 self._respond(404, "not found")
                 return
@@ -246,6 +276,39 @@ def make_server(cfg: Config) -> ThreadingHTTPServer:
                 f"<p class=ok>Queued — video {html.escape(queued)}</p>" if queued else ""
             )
             self._respond(200, PAGE.format(key=html.escape(key), banner=banner, rows=rows))
+
+        def _presign_lookup(self, key: str, sql: str, args: tuple) -> None:
+            """303 to a presigned URL for a storage_uri looked up by SQL.
+            Only r2:// URIs are presignable — a video still at an http(s)
+            source URL hasn't been archived yet."""
+            if not authed(key):
+                self._respond(401, "unauthorised")
+                return
+            try:
+                with db.connect(cfg.database_url) as conn:
+                    row = conn.execute(sql, args).fetchone()
+            except Exception:
+                log.exception("presign lookup failed")
+                self._respond(500, "db error")
+                return
+            if not row or not row["uri"]:
+                self._respond(404, "not found")
+                return
+            if not row["uri"].startswith("r2://"):
+                self._respond(409, "not archived to r2 yet")
+                return
+            bucket, obj_key = r2.parse_uri(row["uri"])
+            self._respond(303, "", {
+                "Location": r2.presign_get(s3, bucket, obj_key, expires_s=3600),
+            })
+
+        def _presign_key(self, key: str, obj_key: str) -> None:
+            if not authed(key):
+                self._respond(401, "unauthorised")
+                return
+            self._respond(303, "", {
+                "Location": r2.presign_get(s3, cfg.r2_bucket, obj_key, expires_s=3600),
+            })
 
         def do_POST(self):
             path = urlparse(self.path).path

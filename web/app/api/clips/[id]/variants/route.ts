@@ -1,0 +1,86 @@
+import { NextResponse } from "next/server";
+import { pool } from "@/lib/db";
+
+export const dynamic = "force-dynamic";
+
+const slugify = (s: string) =>
+  s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 18);
+
+/** Add a variant to a clip: next free label (A, B, C…), scenes and crops
+ * copied from `copy_from` (or the clip's first variant) so the new variant
+ * starts as a working duplicate — the prototype's add-variant behaviour. */
+export async function POST(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  const body = await req.json().catch(() => ({}));
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const existing = await client.query(
+      "SELECT id, label FROM clip_variants WHERE clip_id = $1 ORDER BY label",
+      [id],
+    );
+    if (!existing.rowCount) {
+      await client.query("ROLLBACK");
+      return NextResponse.json({ error: "clip not found" }, { status: 404 });
+    }
+    const used = new Set(existing.rows.map((r) => r.label));
+    let label = "";
+    for (let i = 0; i < 26; i++) {
+      const c = String.fromCharCode(65 + i);
+      if (!used.has(c)) { label = c; break; }
+    }
+    if (!label) {
+      await client.query("ROLLBACK");
+      return NextResponse.json({ error: "26 variants is plenty" }, { status: 400 });
+    }
+    const name = String(body.name || `Variant ${label}`).slice(0, 80);
+    const slug = `${label.toLowerCase()}-${slugify(name) || "variant"}`;
+
+    const srcVariant =
+      body.copy_from && existing.rows.some((r) => r.id === body.copy_from)
+        ? body.copy_from
+        : existing.rows[0].id;
+
+    const ins = await client.query(
+      `INSERT INTO clip_variants (clip_id, label, name, slug)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [id, label, name, slug],
+    );
+    const newId = ins.rows[0].id;
+
+    const scenes = await client.query(
+      "SELECT * FROM variant_scenes WHERE variant_id = $1 ORDER BY idx",
+      [srcVariant],
+    );
+    for (const s of scenes.rows) {
+      const copy = await client.query(
+        `INSERT INTO variant_scenes (variant_id, idx, layout, source_in_s, source_out_s,
+                                     lifted, duration_s, slot_a_asset, slot_b_asset,
+                                     split_ratio, audio)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+        [newId, s.idx, s.layout, s.source_in_s, s.source_out_s, s.lifted,
+         s.duration_s, s.slot_a_asset, s.slot_b_asset, s.split_ratio, s.audio],
+      );
+      await client.query(
+        `INSERT INTO scene_crops (scene_id, ratio, crop_x, crop_y, crop_w, crop_h)
+         SELECT $1, ratio, crop_x, crop_y, crop_w, crop_h
+         FROM scene_crops WHERE scene_id = $2`,
+        [copy.rows[0].id, s.id],
+      );
+    }
+    await client.query("COMMIT");
+    return NextResponse.json({ variant_id: newId, label });
+  } catch (e) {
+    await client.query("ROLLBACK");
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : String(e) },
+      { status: 500 },
+    );
+  } finally {
+    client.release();
+  }
+}

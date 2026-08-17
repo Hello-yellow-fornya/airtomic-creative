@@ -48,6 +48,24 @@ export async function PATCH(
     sets.push(`duration_s = $${n++}`);
     vals.push(Number(body.duration_s));
   }
+  if (body.source_in_s !== undefined) {
+    const v = Number(body.source_in_s);
+    if (!Number.isFinite(v) || v < 0)
+      return NextResponse.json({ error: "bad source_in_s" }, { status: 400 });
+    sets.push(`source_in_s = $${n++}`);
+    vals.push(v);
+  }
+  if (body.source_out_s !== undefined) {
+    const v = Number(body.source_out_s);
+    if (!Number.isFinite(v) || v < 0)
+      return NextResponse.json({ error: "bad source_out_s" }, { status: 400 });
+    sets.push(`source_out_s = $${n++}`);
+    vals.push(v);
+  }
+  if (body.lifted !== undefined) {
+    sets.push(`lifted = $${n++}`);
+    vals.push(!!body.lifted);
+  }
   if (!sets.length)
     return NextResponse.json({ error: "nothing to update" }, { status: 400 });
 
