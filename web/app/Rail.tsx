@@ -18,11 +18,21 @@ const STEPS: {
     idx: "04",
     label: "Clip builder",
     href: "/clips",
-    match: (p) => p === "/clips" || p.startsWith("/variants/"),
+    match: (p) =>
+      p === "/clips" || (p.startsWith("/variants/") && !p.endsWith("/preview")),
   },
-  { idx: "05", label: "Preview", match: () => false },
-  { idx: "06", label: "Review queue", match: () => false },
-  { idx: "07", label: "Send to Meta", match: () => false },
+  {
+    idx: "05",
+    label: "Preview",
+    match: (p) => p.startsWith("/variants/") && p.endsWith("/preview"),
+  },
+  { idx: "06", label: "Review queue", href: "/queue", match: (p) => p === "/queue" },
+  { idx: "07", label: "Send to Meta", href: "/send", match: (p) => p === "/send" },
+];
+
+const SETUP: typeof STEPS = [
+  { idx: "—", label: "Brand assets", href: "/assets", match: (p) => p === "/assets" },
+  { idx: "—", label: "Subtitle styles", href: "/styles", match: (p) => p === "/styles" },
 ];
 
 export default function Rail() {
@@ -39,37 +49,42 @@ export default function Rail() {
       </Link>
       <nav className="nav">
         <div className="nav-label">Workflow</div>
-        {STEPS.map((s) => {
-          const current = s.match(path);
-          if (s.href) {
-            return (
-              <Link
-                key={s.idx}
-                href={s.href}
-                className="nav-item"
-                aria-current={current || undefined}
-              >
-                <span className="idx">{s.idx}</span>
-                {s.label}
-              </Link>
-            );
-          }
-          return (
-            <span
-              key={s.idx}
-              className="nav-item"
-              aria-current={current || undefined}
-              data-off={current ? undefined : "1"}
-            >
-              <span className="idx">{s.idx}</span>
-              {s.label}
-            </span>
-          );
-        })}
+        {STEPS.map((s) => (
+          <RailItem key={s.label} step={s} path={path} />
+        ))}
+        <div className="nav-label">Setup</div>
+        {SETUP.map((s) => (
+          <RailItem key={s.label} step={s} path={path} />
+        ))}
       </nav>
       <div className="rail-foot">
         <p>Ads land paused. Nothing publishes without review.</p>
       </div>
     </aside>
+  );
+}
+
+function RailItem({
+  step,
+  path,
+}: {
+  step: (typeof STEPS)[number];
+  path: string;
+}) {
+  const current = step.match(path);
+  if (step.href) {
+    return (
+      <Link href={step.href} className="nav-item" aria-current={current || undefined}>
+        <span className="idx">{step.idx}</span>
+        {step.label}
+      </Link>
+    );
+  }
+  return (
+    <span className="nav-item" aria-current={current || undefined}
+      data-off={current ? undefined : "1"}>
+      <span className="idx">{step.idx}</span>
+      {step.label}
+    </span>
   );
 }

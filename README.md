@@ -61,10 +61,13 @@ On Railway:
 ### Web app
 
 On Vercel: **Add New Project** → import this repo → set **Root Directory**
-to `web` → add env var `DATABASE_URL` (the Neon string) → Deploy. That is
-the only required variable. Optional: `WORKER_URL` + `INGEST_TOKEN` enable
-keyframe thumbnails via the server-side presign proxy (`/api/keyframes/...`
-— the token never reaches the browser; raw footage stays off public URLs).
+to `web` → add env var `DATABASE_URL` (the Neon string) → Deploy. The app
+runs on that alone, but the full product needs `WORKER_URL` +
+`INGEST_TOKEN` too: they power the server-side presign proxies
+(`/api/keyframes`, `/api/media`, `/api/assets/.../file`, `/api/exports`)
+that play real footage in the builder and preview, plus browser upload and
+URL ingest from the Library screen. The token never reaches the browser;
+raw footage stays off public URLs.
 
 Locally:
 
@@ -100,8 +103,8 @@ setup: the R2 bucket needs a CORS rule (Cloudflare dashboard → R2 → bucket
 ```json
 [
   {
-    "AllowedOrigins": ["https://<worker-domain>"],
-    "AllowedMethods": ["PUT"],
+    "AllowedOrigins": ["https://<worker-domain>", "https://<vercel-domain>"],
+    "AllowedMethods": ["PUT", "GET"],
     "AllowedHeaders": ["content-type"],
     "ExposeHeaders": ["ETag"],
     "MaxAgeSeconds": 3600
@@ -110,7 +113,9 @@ setup: the R2 bucket needs a CORS rule (Cloudflare dashboard → R2 → bucket
 ```
 
 Without `ExposeHeaders: ETag` multipart uploads fail — the browser can't
-read part ETags.
+read part ETags. `GET` + the Vercel origin lets the clip builder's
+filmstrip draw real frames from the source video (it falls back to neutral
+tiles without it; playback itself doesn't need CORS).
 
 **From a local file (CLI):**
 
