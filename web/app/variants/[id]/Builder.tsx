@@ -529,7 +529,14 @@ export default function Builder({
         </div>
 
         <div className="stage">
-          <div className="src" ref={srcRef} style={{ aspectRatio: `${srcAr}` }}>
+          {/* The .src box IS the displayed frame: sized to fit the stage on
+              both axes at the source's aspect, so crop percentages measure
+              the displayed frame exactly. 420px height cap keeps the
+              filmstrip and transport on a laptop screen. */}
+          <div className="src" ref={srcRef} style={{
+            aspectRatio: `${srcAr}`,
+            width: `min(100%, 520px, ${Math.round(420 * srcAr)}px)`,
+          }}>
             {workerUp && !videoErr ? (
               <video
                 ref={videoRef}
@@ -932,8 +939,13 @@ export default function Builder({
           </div>
         </div>
         <div className="note" style={{ marginTop: 10 }}>
-          Landscape source, vertical output. Drag the frame to reframe and the
-          yellow handles to trim — both save with the clip, so re-exports keep them.
+          {srcAr > 1
+            ? "Landscape source, vertical output — narrower ratios crop width. "
+            : srcAr < 0.99
+              ? "Vertical source — wider ratios crop height and reframe vertically; 9:16 uses the whole frame. "
+              : "Square source — vertical ratios crop width, wide ratios crop height. "}
+          Drag the frame to reframe and the yellow handles to trim — both save
+          with the clip, so re-exports keep them.
         </div>
         {note && <p className="hint">{note}</p>}
       </div>

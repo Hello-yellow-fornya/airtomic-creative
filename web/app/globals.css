@@ -297,13 +297,16 @@ select,input[type=text]{
 .build{display:grid;grid-template-columns:1fr 300px;gap:16px;align-items:start}
 @media(max-width:980px){.build{grid-template-columns:1fr}}
 
-.stage{background:var(--ink);border-radius:var(--radius);padding:20px;display:flex;
-  justify-content:center;align-items:center;min-height:340px}
+.stage{background:var(--ink);border-radius:var(--radius);padding:16px;display:flex;
+  justify-content:center;align-items:center;min-height:280px}
+/* .src is sized inline by the builder to fit the stage at the SOURCE's
+   aspect ratio (both axes constrained) — the box always equals the
+   displayed frame, so the crop overlay's percentages stay true. */
 .src{
   position:relative;width:100%;max-width:520px;aspect-ratio:16/9;border-radius:2px;overflow:hidden;
   background:#11131A;
 }
-.src video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.src video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block}
 .crop{
   position:absolute;top:0;bottom:0;width:28.125%;
   box-shadow:0 0 0 9999px rgba(0,0,0,.62);
