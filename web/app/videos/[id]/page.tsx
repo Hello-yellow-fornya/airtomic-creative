@@ -1,16 +1,10 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { q } from "@/lib/db";
 import { Topbar } from "../../ui";
-import Transcript from "./Transcript";
+import Analyse from "./Analyse";
 
 export const dynamic = "force-dynamic";
-
-type SceneRow = { id: string; idx: number; start_s: string; end_s: string; has_kf: boolean };
-
-function fmtTs(s: number) {
-  const secs = Math.round(s);
-  return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
-}
 
 export default async function VideoPage({
   params,
@@ -26,18 +20,17 @@ export default async function VideoPage({
   );
   if (!video) notFound();
 
-  const scenes = await q<SceneRow>(
+  const scenes = await q<{ id: string; idx: number; start_s: string; end_s: string; has_kf: boolean }>(
     `SELECT id::text, idx, start_s::text, end_s::text,
             (keyframe_uri IS NOT NULL) AS has_kf
      FROM scenes WHERE video_id = $1 ORDER BY idx`,
     [id],
   );
-  const kfEnabled = !!(process.env.WORKER_URL && process.env.INGEST_TOKEN);
 
   const segments = await q<{
-    id: string; idx: number; speaker: string | null; start_s: string;
+    id: string; idx: number; speaker: string | null; start_s: string; end_s: string;
   }>(
-    `SELECT s.id::text, s.idx, s.speaker, s.start_s::text
+    `SELECT s.id::text, s.idx, s.speaker, s.start_s::text, s.end_s::text
      FROM transcript_segments s JOIN transcripts t ON t.id = s.transcript_id
      WHERE t.video_id = $1 ORDER BY s.idx`,
     [id],
@@ -52,62 +45,45 @@ export default async function VideoPage({
     [id],
   );
 
+  // Suggested cuts, if the recommendation engine has produced any.
+  const candidates = await q<{
+    id: string; start_s: string; end_s: string; score: string | null;
+    rationale: string | null;
+  }>(
+    `SELECT id::text, start_s::text, end_s::text, score::text, rationale
+     FROM clip_candidates WHERE video_id = $1 AND status = 'suggested'
+     ORDER BY score DESC NULLS LAST`,
+    [id],
+  );
+
+  const kfEnabled = !!(process.env.WORKER_URL && process.env.INGEST_TOKEN);
   const duration = parseFloat(video.duration_s ?? "0") || 1;
+  const speakers = [...new Set(segments.map((s) => s.speaker).filter(Boolean))] as string[];
 
   return (
     <>
       <Topbar
         title={video.title ?? "untitled"}
-        sub={`${scenes.length} scenes · ${words.length} words · status ${video.status}`}
-      />
+        sub="Word-level timing, speakers and scene boundaries"
+      >
+        <Link className="btn ghost sm" href={`/cuts?video=${video.id}`}>
+          See suggested cuts
+        </Link>
+      </Topbar>
       <section className="screen">
-        <h2 className="sec">Scene timeline</h2>
-        <div className="tl-wrap" style={{ marginBottom: 26 }}>
-          <div className="ruler">
-            <span>0:00</span>
-            <span>{fmtTs(duration / 2)}</span>
-            <span>{fmtTs(duration)}</span>
-          </div>
-          <div className="lane-tag">Detected cuts</div>
-          <div className="timeline">
-            {scenes.map((s) => {
-              const d = parseFloat(s.end_s) - parseFloat(s.start_s);
-              return (
-                <div
-                  key={s.idx}
-                  className="scene"
-                  style={{
-                    flex: Math.max(d / duration, 0.004),
-                    ...(kfEnabled && s.has_kf
-                      ? {
-                          backgroundImage: `url(/api/keyframes/${s.id})`,
-                          backgroundSize: "cover",
-                          backgroundPosition: "center",
-                          color: "#fff",
-                          textShadow: "0 0 3px #000",
-                        }
-                      : {}),
-                  }}
-                  title={`scene ${s.idx} · ${s.start_s}s – ${s.end_s}s`}
-                >
-                  s{s.idx}
-                </div>
-              );
-            })}
-          </div>
-          <p className="hint">
-            Widths proportional to duration. Select a passage below to cut a
-            clip: click the first word, then the last word.
-          </p>
-        </div>
-
-        <h2 className="sec">Transcript</h2>
-        <Transcript
+        <Analyse
           videoId={video.id}
+          title={video.title ?? "untitled"}
+          duration={duration}
+          nSpeakers={speakers.length}
+          scenes={scenes.map((s) => ({
+            id: s.id, idx: s.idx,
+            start: parseFloat(s.start_s), end: parseFloat(s.end_s),
+            hasKf: s.has_kf,
+          }))}
           segments={segments.map((s) => ({
-            id: s.id,
-            speaker: s.speaker,
-            start: s.start_s ? parseFloat(s.start_s) : null,
+            id: s.id, speaker: s.speaker,
+            start: parseFloat(s.start_s), end: parseFloat(s.end_s),
           }))}
           words={words.map((w) => ({
             idx: w.idx, word: w.word,
@@ -115,6 +91,13 @@ export default async function VideoPage({
             end: w.end_s ? parseFloat(w.end_s) : null,
             seg: w.segment_id,
           }))}
+          candidates={candidates.map((c, i) => ({
+            id: c.id, rank: i + 1,
+            start: parseFloat(c.start_s), end: parseFloat(c.end_s),
+            score: c.score ? parseFloat(c.score) : null,
+          }))}
+          speakers={speakers}
+          kfEnabled={kfEnabled}
         />
       </section>
     </>

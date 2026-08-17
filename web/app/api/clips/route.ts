@@ -13,6 +13,7 @@ export async function POST(req: Request) {
   const startS = Number(body?.start_s);
   const endS = Number(body?.end_s);
   const name = (body?.name as string | null) ?? null;
+  const candidateId = (body?.candidate_id as string | null) ?? null;
 
   if (!videoId || !Number.isFinite(startS) || !Number.isFinite(endS)) {
     return NextResponse.json(
@@ -35,10 +36,17 @@ export async function POST(req: Request) {
       "SELECT id FROM subtitle_presets WHERE is_default ORDER BY created_at LIMIT 1",
     );
     const clip = await client.query(
-      `INSERT INTO clips (video_id, name, source_in_s, source_out_s, subtitle_preset_id, created_by)
-       VALUES ($1, $2, $3, $4, $5, 'web') RETURNING id`,
-      [videoId, name, startS, endS, preset.rows[0]?.id ?? null],
+      `INSERT INTO clips (video_id, name, source_in_s, source_out_s, subtitle_preset_id,
+                          candidate_id, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, 'web') RETURNING id`,
+      [videoId, name, startS, endS, preset.rows[0]?.id ?? null, candidateId],
     );
+    if (candidateId) {
+      await client.query(
+        "UPDATE clip_candidates SET status = 'used' WHERE id = $1",
+        [candidateId],
+      );
+    }
     const clipId = clip.rows[0].id;
 
     const variant = await client.query(

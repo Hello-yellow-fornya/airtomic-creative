@@ -13,7 +13,7 @@ const STEPS: {
 }[] = [
   { idx: "01", label: "Library", href: "/", match: (p) => p === "/" },
   { idx: "02", label: "Transcript", match: (p) => p.startsWith("/videos/") },
-  { idx: "03", label: "Suggested cuts", match: () => false },
+  { idx: "03", label: "Suggested cuts", href: "/cuts", match: (p) => p === "/cuts" },
   {
     idx: "04",
     label: "Clip builder",
