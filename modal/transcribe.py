@@ -27,6 +27,7 @@ Deploy:
         # Prints the URL for the worker's MODAL_TRANSCRIBE_URL.
 """
 
+import json
 import os
 import secrets as py_secrets
 
@@ -298,6 +299,42 @@ def transcribe(
             gc.collect()
             torch.cuda.empty_cache()
 
+    return _build_payload(
+        result, language, speakers_assigned, diarisation_error, len(audio)
+    )
+
+
+def _jsonable(value):
+    """Recursively convert WhisperX output to plain JSON types. The return
+    value crosses a Modal function boundary into the api container, which
+    (deliberately) has no numpy — an np.float32 anywhere in the payload
+    makes deserialisation fail there. Non-finite floats become None:
+    starlette encodes with allow_nan=False, so a NaN score would 500 the
+    /result poll."""
+    import math
+
+    import numpy as np
+
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, np.ndarray):
+        value = value.tolist()
+    if isinstance(value, dict):
+        return {k: _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+
+def _build_payload(
+    result: dict,
+    language: str,
+    diarised: bool,
+    diarisation_error: str | None,
+    n_samples: int,
+) -> dict:
     segments = [
         {
             "start": seg.get("start"),
@@ -320,15 +357,20 @@ def transcribe(
         for seg in result["segments"]
     ]
 
-    return {
+    payload = _jsonable({
         "engine": "whisperx",
         "model": WHISPER_MODEL,
         "language": language,
-        "diarised": speakers_assigned,
+        "diarised": diarised,
         "diarisation_error": diarisation_error,
-        "duration_s": round(len(audio) / 16000.0, 3),
+        "duration_s": round(n_samples / 16000.0, 3),
         "segments": segments,
-    }
+    })
+    # Fail HERE, with a traceback naming the offending value, rather than as
+    # an opaque deserialisation error in the api container or a 500 on the
+    # poll route. Matches starlette's encoder settings.
+    json.dumps(payload, allow_nan=False)
+    return payload
 
 
 api_image = modal.Image.debian_slim(python_version="3.11").pip_install(
