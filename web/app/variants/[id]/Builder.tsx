@@ -350,29 +350,89 @@ export default function Builder({
 
   const stripRef = useRef<HTMLDivElement>(null);
   const [handleMode, setHandleMode] = useState<"l" | "r" | null>(null);
+  const [resumeAfterTrim, setResumeAfterTrim] = useState(false);
   const timeAt = (clientX: number) => {
     const [a, b] = ctx;
     const r = stripRef.current!.getBoundingClientRect();
     return a + Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * (b - a);
   };
-  function onHandleMove(e: React.PointerEvent) {
-    if (!handleMode) return;
-    const time = timeAt(e.clientX);
-    if (handleMode === "l") setIN(Math.min(time, OUT - MIN_CLIP));
-    else setOUT(Math.max(time, IN + MIN_CLIP));
+
+  /** iPhone-trimmer handles: while a handle drags, the player scrubs LIVE
+   * to the frame under it (rAF-throttled), so you watch your first/last
+   * frame as you choose it. Playback pauses for the drag and resumes on
+   * release if it was running. Same hardened pattern as the crop drag:
+   * state in locals, listeners on window, capture best-effort. */
+  function onHandleDown(mode: "l" | "r") {
+    return (e: React.PointerEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+      const id = e.pointerId;
+      const wasPlaying = playing;
+      if (wasPlaying) pause();
+      setHandleMode(mode);
+      let lastIn = IN;
+      let lastOut = OUT;
+
+      // live scrub, at most one seek per frame
+      let raf: number | null = null;
+      let want: number | null = null;
+      const scrubTo = (src: number) => {
+        want = src;
+        if (raf !== null) return;
+        raf = requestAnimationFrame(() => {
+          raf = null;
+          const v = videoRef.current;
+          if (v && want !== null && Number.isFinite(v.duration)) v.currentTime = want;
+        });
+      };
+
+      const onMove = (ev: PointerEvent) => {
+        if (ev.pointerId !== id) return;
+        const time = timeAt(ev.clientX);
+        if (mode === "l") {
+          lastIn = Math.min(time, lastOut - MIN_CLIP);
+          setIN(lastIn);
+          setT(0);              // playhead rides the in-point
+          scrubTo(lastIn);      // preview shows the first frame being chosen
+        } else {
+          lastOut = Math.max(time, lastIn + MIN_CLIP);
+          setOUT(lastOut);
+          setT(lastOut - lastIn); // playhead rides the out-point
+          scrubTo(lastOut);       // preview shows the last frame being chosen
+        }
+      };
+      const onUp = (ev: PointerEvent) => {
+        if (ev.pointerId !== id) return;
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+        if (raf !== null) cancelAnimationFrame(raf);
+        setHandleMode(null);
+        // land exactly on the chosen frame
+        const v = videoRef.current;
+        if (v && Number.isFinite(v.duration))
+          v.currentTime = mode === "l" ? lastIn : lastOut;
+        void fetch(`/api/clips/${variant.clipId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ source_in_s: lastIn, source_out_s: lastOut }),
+        }).then(() => router.refresh());
+        if (wasPlaying) setResumeAfterTrim(true);
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+    };
   }
-  async function onHandleUp(e: React.PointerEvent) {
-    if (!handleMode) return;
-    setHandleMode(null);
-    try { (e.target as Element).releasePointerCapture(e.pointerId); } catch {}
-    setT((cur) => Math.min(cur, OUT - IN));
-    await fetch(`/api/clips/${variant.clipId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source_in_s: IN, source_out_s: OUT }),
-    });
-    router.refresh();
-  }
+
+  // resume with fresh IN/OUT bounds after a trim drag that interrupted play
+  useEffect(() => {
+    if (resumeAfterTrim && !handleMode) {
+      setResumeAfterTrim(false);
+      play();
+    }
+  }, [resumeAfterTrim, handleMode, play]);
 
   // ----- api helper -----
   const call = useCallback(async (url: string, method: string, body?: unknown) => {
@@ -673,25 +733,9 @@ export default function Builder({
           <div className="mask" style={{ right: 0, width: `${100 - winR}%` }} />
           <div className="win" style={{ left: `${winL}%`, width: `${winR - winL}%` }}>
             <div className="hnd l" role="slider" aria-label="Clip start"
-              onPointerDown={(e) => {
-                setHandleMode("l");
-                (e.target as Element).setPointerCapture(e.pointerId);
-                e.preventDefault(); e.stopPropagation();
-              }}
-              onPointerMove={onHandleMove}
-              onPointerUp={onHandleUp}
-              onPointerCancel={onHandleUp}
-            />
+              onPointerDown={onHandleDown("l")} />
             <div className="hnd r" role="slider" aria-label="Clip end"
-              onPointerDown={(e) => {
-                setHandleMode("r");
-                (e.target as Element).setPointerCapture(e.pointerId);
-                e.preventDefault(); e.stopPropagation();
-              }}
-              onPointerMove={onHandleMove}
-              onPointerUp={onHandleUp}
-              onPointerCancel={onHandleUp}
-            />
+              onPointerDown={onHandleDown("r")} />
           </div>
           <div className="strip-ph" style={{ left: `${((IN + Math.min(t, clipDur) - a0) / span) * 100}%` }} />
         </div>
