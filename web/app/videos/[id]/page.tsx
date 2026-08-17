@@ -1,10 +1,16 @@
 import { notFound } from "next/navigation";
 import { q } from "@/lib/db";
+import { Topbar } from "../../ui";
 import Transcript from "./Transcript";
 
 export const dynamic = "force-dynamic";
 
 type SceneRow = { id: string; idx: number; start_s: string; end_s: string; has_kf: boolean };
+
+function fmtTs(s: number) {
+  const secs = Math.round(s);
+  return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+}
 
 export default async function VideoPage({
   params,
@@ -50,54 +56,67 @@ export default async function VideoPage({
 
   return (
     <>
-      <h1>{video.title ?? "untitled"}</h1>
-      <p className="sub">
-        {scenes.length} scenes · {words.length} words · status {video.status}
-      </p>
-
-      <div className="timeline">
-        {scenes.map((s) => {
-          const d = parseFloat(s.end_s) - parseFloat(s.start_s);
-          return (
-            <div
-              key={s.idx}
-              className="scene"
-              style={{
-                flex: Math.max(d / duration, 0.004),
-                ...(kfEnabled && s.has_kf
-                  ? {
-                      backgroundImage: `url(/api/keyframes/${s.id})`,
-                      backgroundSize: "cover",
-                      backgroundPosition: "center",
-                      color: "#fff",
-                      textShadow: "0 0 3px #000",
-                    }
-                  : {}),
-              }}
-              title={`scene ${s.idx} · ${s.start_s}s – ${s.end_s}s`}
-            >
-              s{s.idx}
-            </div>
-          );
-        })}
-      </div>
-      <p className="hint">
-        Scene timeline (widths proportional to duration). Select a passage below
-        to cut a clip: click the first word, then the last word.
-      </p>
-
-      <Transcript
-        videoId={video.id}
-        segments={segments.map((s) => ({
-          id: s.id, speaker: s.speaker,
-        }))}
-        words={words.map((w) => ({
-          idx: w.idx, word: w.word,
-          start: w.start_s ? parseFloat(w.start_s) : null,
-          end: w.end_s ? parseFloat(w.end_s) : null,
-          seg: w.segment_id,
-        }))}
+      <Topbar
+        title={video.title ?? "untitled"}
+        sub={`${scenes.length} scenes · ${words.length} words · status ${video.status}`}
       />
+      <section className="screen">
+        <h2 className="sec">Scene timeline</h2>
+        <div className="tl-wrap" style={{ marginBottom: 26 }}>
+          <div className="ruler">
+            <span>0:00</span>
+            <span>{fmtTs(duration / 2)}</span>
+            <span>{fmtTs(duration)}</span>
+          </div>
+          <div className="lane-tag">Detected cuts</div>
+          <div className="timeline">
+            {scenes.map((s) => {
+              const d = parseFloat(s.end_s) - parseFloat(s.start_s);
+              return (
+                <div
+                  key={s.idx}
+                  className="scene"
+                  style={{
+                    flex: Math.max(d / duration, 0.004),
+                    ...(kfEnabled && s.has_kf
+                      ? {
+                          backgroundImage: `url(/api/keyframes/${s.id})`,
+                          backgroundSize: "cover",
+                          backgroundPosition: "center",
+                          color: "#fff",
+                          textShadow: "0 0 3px #000",
+                        }
+                      : {}),
+                  }}
+                  title={`scene ${s.idx} · ${s.start_s}s – ${s.end_s}s`}
+                >
+                  s{s.idx}
+                </div>
+              );
+            })}
+          </div>
+          <p className="hint">
+            Widths proportional to duration. Select a passage below to cut a
+            clip: click the first word, then the last word.
+          </p>
+        </div>
+
+        <h2 className="sec">Transcript</h2>
+        <Transcript
+          videoId={video.id}
+          segments={segments.map((s) => ({
+            id: s.id,
+            speaker: s.speaker,
+            start: s.start_s ? parseFloat(s.start_s) : null,
+          }))}
+          words={words.map((w) => ({
+            idx: w.idx, word: w.word,
+            start: w.start_s ? parseFloat(w.start_s) : null,
+            end: w.end_s ? parseFloat(w.end_s) : null,
+            seg: w.segment_id,
+          }))}
+        />
+      </section>
     </>
   );
 }

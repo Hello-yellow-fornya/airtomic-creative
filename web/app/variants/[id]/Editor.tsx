@@ -88,37 +88,35 @@ export default function Editor({
   return (
     <div>
       {/* scene strip */}
-      <div className="timeline" style={{ height: 56 }}>
+      <div className="lane-tag">Scene order</div>
+      <div className="timeline" style={{ height: 56, marginBottom: 12 }}>
         {scenes.map((s, i) => (
           <div
             key={s.id}
-            className="scene"
+            className={`scene${s.layout === "card" ? " is-card" : ""}`}
+            data-on={i === sel ? "1" : undefined}
             onClick={() => setSel(i)}
-            style={{
-              flex: Math.max(sceneDur(s) / (total || 1), 0.04),
-              outline: i === sel ? "2px solid var(--ink)" : "none",
-              background: s.layout === "card" ? "#dcd4f5" : undefined,
-            }}
+            style={{ flex: Math.max(sceneDur(s) / (total || 1), 0.04), cursor: "pointer" }}
           >
             {s.layout} · {sceneDur(s).toFixed(1)}s
           </div>
         ))}
       </div>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
-        <button className="chipbtn" disabled={busy}
+      <div style={{ display: "flex", gap: 8, marginBottom: 18, flexWrap: "wrap" }}>
+        <button className="btn ghost sm" disabled={busy}
           onClick={() => call(`/api/variants/${variantId}/scenes`, "POST",
             { layout: "card", slot_a_asset: assets[0]?.id ?? null })}>
           + End card
         </button>
-        <button className="chipbtn" disabled={busy}
+        <button className="btn ghost sm" disabled={busy}
           onClick={() => call(`/api/variants/${variantId}/scenes`, "POST",
             { layout: "split_product", slot_a_asset: assets[0]?.id ?? null })}>
           + Product split
         </button>
         <span style={{ flex: 1 }} />
         {Object.keys(RATIOS).map((r) => (
-          <button key={r} className="chipbtn" disabled={busy}
+          <button key={r} className="btn ghost sm" disabled={busy}
             onClick={async () => {
               if (await call(`/api/variants/${variantId}/render`, "POST", { ratio: r }))
                 setNote(`render queued: ${RATIOS[r].label}`);
@@ -129,26 +127,31 @@ export default function Editor({
       </div>
 
       {scene && (
-        <div className="card">
-          <div className="row">
+        <div className="card pad">
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
             <strong>
               Scene {scene.idx}
-              {scene.layout !== "card" &&
-                ` · source ${scene.in?.toFixed(1)}s – ${scene.out?.toFixed(1)}s`}
-              {scene.lifted && scene.layout !== "card" && " · lifted"}
+              {scene.layout !== "card" && (
+                <span className="mono" style={{ fontSize: 11, color: "var(--muted)" }}>
+                  {" "}· {scene.in?.toFixed(1)}s – {scene.out?.toFixed(1)}s
+                </span>
+              )}
+              {scene.lifted && scene.layout !== "card" && (
+                <span className="tag" style={{ marginLeft: 7 }}>lifted</span>
+              )}
             </strong>
-            <span>
-              <button className="chipbtn" disabled={busy || sel === 0}
+            <span style={{ display: "flex", gap: 5 }}>
+              <button className="chip" disabled={busy || sel === 0}
                 onClick={async () => {
                   if (await call(`/api/scenes/${scene.id}/move`, "POST", { dir: "up" }))
                     setSel(sel - 1);
-                }}>← earlier</button>{" "}
-              <button className="chipbtn" disabled={busy || sel === scenes.length - 1}
+                }}>← earlier</button>
+              <button className="chip" disabled={busy || sel === scenes.length - 1}
                 onClick={async () => {
                   if (await call(`/api/scenes/${scene.id}/move`, "POST", { dir: "down" }))
                     setSel(sel + 1);
-                }}>later →</button>{" "}
-              <button className="chipbtn" disabled={busy || scenes.length < 2}
+                }}>later →</button>
+              <button className="chip" disabled={busy || scenes.length < 2}
                 onClick={async () => {
                   if (await call(`/api/scenes/${scene.id}`, "DELETE"))
                     setSel(Math.max(0, sel - 1));
@@ -156,35 +159,39 @@ export default function Editor({
             </span>
           </div>
 
-          <div style={{ display: "flex", gap: 24, marginTop: 14, flexWrap: "wrap" }}>
-            <div>
-              <div className="spk">Layout</div>
-              {LAYOUTS.map((l) => (
-                <button key={l} className="chipbtn"
-                  disabled={busy || (l === "card" && scene.layout !== "card")}
-                  style={{ fontWeight: scene.layout === l ? 700 : 400 }}
-                  onClick={() => call(`/api/scenes/${scene.id}`, "PATCH", { layout: l })}>
-                  {l}
-                </button>
-              ))}
+          <div style={{ display: "flex", gap: 28, marginTop: 16, flexWrap: "wrap" }}>
+            <div className="ctrl-grp">
+              <span className="eyebrow">Layout</span>
+              <div className="chips">
+                {LAYOUTS.map((l) => (
+                  <button key={l} className="chip"
+                    data-on={scene.layout === l ? "1" : undefined}
+                    disabled={busy || (l === "card" && scene.layout !== "card")}
+                    onClick={() => call(`/api/scenes/${scene.id}`, "PATCH", { layout: l })}>
+                    {l}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {(scene.layout === "split_product" || scene.layout === "split_speakers") && (
-              <div>
-                <div className="spk">Split (upper share — presets only)</div>
-                {SPLITS.map((r) => (
-                  <button key={r} className="chipbtn" disabled={busy}
-                    style={{ fontWeight: scene.splitRatio === r ? 700 : 400 }}
-                    onClick={() => call(`/api/scenes/${scene.id}`, "PATCH", { split_ratio: r })}>
-                    {Math.round(r * 100)}/{Math.round((1 - r) * 100)}
-                  </button>
-                ))}
+              <div className="ctrl-grp">
+                <span className="eyebrow">Split · upper share (presets only)</span>
+                <div className="chips">
+                  {SPLITS.map((r) => (
+                    <button key={r} className="chip" disabled={busy}
+                      data-on={scene.splitRatio === r ? "1" : undefined}
+                      onClick={() => call(`/api/scenes/${scene.id}`, "PATCH", { split_ratio: r })}>
+                      {Math.round(r * 100)}/{Math.round((1 - r) * 100)}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
 
             {(scene.layout === "split_product" || scene.layout === "card") && (
-              <div>
-                <div className="spk">Asset slot</div>
+              <div className="ctrl-grp">
+                <span className="eyebrow">Asset slot</span>
                 <select
                   value={scene.asset ?? ""}
                   disabled={busy}
@@ -199,29 +206,31 @@ export default function Editor({
             )}
 
             {scene.layout !== "card" && (
-              <div>
-                <div className="spk">Audio</div>
-                {["source", "mute"].map((a) => (
-                  <button key={a} className="chipbtn" disabled={busy}
-                    style={{ fontWeight: scene.audio === a ? 700 : 400 }}
-                    onClick={() => call(`/api/scenes/${scene.id}`, "PATCH", { audio: a })}>
-                    {a}
-                  </button>
-                ))}
-                <div className="hint">Speaker audio wins in splits; assets are muted.</div>
+              <div className="ctrl-grp">
+                <span className="eyebrow">Audio</span>
+                <div className="chips">
+                  {["source", "mute"].map((a) => (
+                    <button key={a} className="chip" disabled={busy}
+                      data-on={scene.audio === a ? "1" : undefined}
+                      onClick={() => call(`/api/scenes/${scene.id}`, "PATCH", { audio: a })}>
+                      {a}
+                    </button>
+                  ))}
+                </div>
+                <p className="hint" style={{ marginTop: 2 }}>
+                  Speaker audio wins in splits; assets are muted.
+                </p>
               </div>
             )}
           </div>
 
           {scene.layout !== "card" && (
-            <div style={{ marginTop: 18 }}>
-              <div className="spk">
-                Reframe — per ratio (saved per scene per ratio)
-              </div>
-              <div style={{ display: "flex", gap: 6, margin: "6px 0" }}>
+            <div style={{ marginTop: 20 }}>
+              <span className="eyebrow">Reframe — saved per scene per ratio</span>
+              <div className="chips" style={{ display: "flex", gap: 5, margin: "7px 0" }}>
                 {Object.keys(RATIOS).map((r) => (
-                  <button key={r} className="chipbtn" disabled={busy}
-                    style={{ fontWeight: cropRatio === r ? 700 : 400 }}
+                  <button key={r} className="chip" disabled={busy}
+                    data-on={cropRatio === r ? "1" : undefined}
                     onClick={() => setCropRatio(r)}>
                     {RATIOS[r].label}
                     {crops.some((c) => c.sceneId === scene.id && c.ratio === r) ? " ●" : ""}
@@ -234,11 +243,11 @@ export default function Editor({
                 style={{ width: 340 }}
                 onChange={(e) => saveCrop(Number(e.target.value))}
               />
-              <div className="hint">
+              <p className="hint">
                 {box.axis === "y"
                   ? `1.91:1 is wider than the source — it crops HEIGHT (${(box.h * 100).toFixed(1)}% kept) and drags vertically.`
                   : `Window is ${(box.w * 100).toFixed(1)}% of source width — drags horizontally.`}
-              </div>
+              </p>
             </div>
           )}
         </div>

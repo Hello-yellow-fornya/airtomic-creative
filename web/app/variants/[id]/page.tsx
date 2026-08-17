@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { q } from "@/lib/db";
+import { Topbar } from "../../ui";
 import Editor from "./Editor";
 
 export const dynamic = "force-dynamic";
@@ -51,33 +52,43 @@ export default async function VariantPage({
 
   return (
     <>
-      <h1>
-        {variant.clip_name ?? "untitled clip"} · variant {variant.label}
-      </h1>
-      <p className="sub">
-        {variant.video_title} · approval {variant.status}
-        {variant.export_uri ? ` · last export ${variant.export_uri}` : ""}
-      </p>
-      <Editor
-        variantId={variant.id}
-        srcAr={(variant.src_w ?? 16) / (variant.src_h ?? 9)}
-        scenes={scenes.map((s) => ({
-          id: s.id, idx: s.idx, layout: s.layout,
-          in: s.source_in_s ? parseFloat(s.source_in_s) : null,
-          out: s.source_out_s ? parseFloat(s.source_out_s) : null,
-          dur: s.duration_s ? parseFloat(s.duration_s) : null,
-          lifted: s.lifted,
-          asset: s.slot_a_asset,
-          splitRatio: s.split_ratio ? parseFloat(s.split_ratio) : 0.5,
-          audio: s.audio,
-        }))}
-        crops={crops.map((c) => ({
-          sceneId: c.scene_id, ratio: c.ratio,
-          x: parseFloat(c.crop_x), y: parseFloat(c.crop_y),
-          w: parseFloat(c.crop_w), h: parseFloat(c.crop_h),
-        }))}
-        assets={assets}
+      <Topbar
+        title={`${variant.clip_name ?? "untitled clip"} · variant ${variant.label}`}
+        sub={
+          <>
+            {variant.video_title} · approval{" "}
+            <span className="tag">{variant.status}</span>
+            {variant.export_uri && (
+              <>
+                {" "}· last export{" "}
+                <span className="mono">{variant.export_uri}</span>
+              </>
+            )}
+          </>
+        }
       />
+      <section className="screen">
+        <Editor
+          variantId={variant.id}
+          srcAr={(variant.src_w ?? 16) / (variant.src_h ?? 9)}
+          scenes={scenes.map((s) => ({
+            id: s.id, idx: s.idx, layout: s.layout,
+            in: s.source_in_s ? parseFloat(s.source_in_s) : null,
+            out: s.source_out_s ? parseFloat(s.source_out_s) : null,
+            dur: s.duration_s ? parseFloat(s.duration_s) : null,
+            lifted: s.lifted,
+            asset: s.slot_a_asset,
+            splitRatio: s.split_ratio ? parseFloat(s.split_ratio) : 0.5,
+            audio: s.audio,
+          }))}
+          crops={crops.map((c) => ({
+            sceneId: c.scene_id, ratio: c.ratio,
+            x: parseFloat(c.crop_x), y: parseFloat(c.crop_y),
+            w: parseFloat(c.crop_w), h: parseFloat(c.crop_h),
+          }))}
+          assets={assets}
+        />
+      </section>
     </>
   );
 }

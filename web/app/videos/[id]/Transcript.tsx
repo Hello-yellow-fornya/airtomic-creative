@@ -4,7 +4,13 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type Word = { idx: number; word: string; start: number | null; end: number | null; seg: string | null };
-type Segment = { id: string; speaker: string | null };
+type Segment = { id: string; speaker: string | null; start: number | null };
+
+function fmtTs(s: number | null) {
+  if (s === null) return "";
+  const secs = Math.floor(s);
+  return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+}
 
 export default function Transcript({
   videoId,
@@ -76,31 +82,34 @@ export default function Transcript({
   }
 
   return (
-    <div className="transcript">
-      {segments.map((seg) => {
-        const segWords = bySegment.get(seg.id) ?? [];
-        if (!segWords.length) return null;
-        return (
-          <div className="seg" key={seg.id}>
-            {seg.speaker && <div className="spk">{seg.speaker}</div>}
-            <div>
-              {segWords.map((w) => {
-                const inSel = lo !== null && w.idx >= lo && w.idx <= hi!;
-                const isEdge = w.idx === selStart || w.idx === selEnd;
-                return (
-                  <span
-                    key={w.idx}
-                    className={`w${inSel ? " insel" : ""}${isEdge ? " edge" : ""}`}
-                    onClick={() => clickWord(w.idx)}
-                  >
-                    {w.word}{" "}
-                  </span>
-                );
-              })}
+    <>
+      <div className="tx">
+        {segments.map((seg) => {
+          const segWords = bySegment.get(seg.id) ?? [];
+          if (!segWords.length) return null;
+          return (
+            <div className="tx-line" key={seg.id}>
+              <span className="tx-t">{fmtTs(seg.start)}</span>
+              <span className="tx-s">{seg.speaker ?? ""}</span>
+              <div className="tx-x">
+                {segWords.map((w) => {
+                  const inSel = lo !== null && w.idx >= lo && w.idx <= hi!;
+                  const isEdge = w.idx === selStart || w.idx === selEnd;
+                  return (
+                    <span
+                      key={w.idx}
+                      className={`w${inSel ? " insel" : ""}${isEdge ? " edge" : ""}`}
+                      onClick={() => clickWord(w.idx)}
+                    >
+                      {w.word}{" "}
+                    </span>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
 
       {startS !== null && endS !== null && (
         <div className="selbar">
@@ -114,12 +123,12 @@ export default function Transcript({
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
-          <button onClick={createClip} disabled={busy || selEnd === null}>
+          <button className="go" onClick={createClip} disabled={busy || selEnd === null}>
             {busy ? "Creating…" : "Create clip + render"}
           </button>
-          {error && <span style={{ color: "#ffb4a9", fontSize: 12 }}>{error}</span>}
+          {error && <span className="err">{error}</span>}
         </div>
       )}
-    </div>
+    </>
   );
 }

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { q } from "@/lib/db";
+import { Topbar } from "../ui";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,12 @@ type Row = {
   render_status: string | null;
   render_error: string | null;
 };
+
+function renderTag(status: string) {
+  if (status === "done") return "tag ok";
+  if (status === "failed") return "tag flag";
+  return "tag";
+}
 
 export default async function ClipsPage() {
   const rows = await q<Row>(`
@@ -37,52 +44,70 @@ export default async function ClipsPage() {
 
   return (
     <>
-      <h1>Clips</h1>
-      <p className="sub">
-        Each variant is one ad. Renders land in R2 as exports/&lt;variant&gt;/&lt;ratio&gt;.mp4.
-      </p>
-      {rows.length === 0 && <p className="hint">No clips yet — open a video and select a passage.</p>}
-      {rows.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>Clip</th><th>Source range</th><th>Variant</th>
-              <th>Approval</th><th>Render</th><th>Export</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.variant_id}>
-                <td>
-                  <strong>{r.clip_name ?? "untitled clip"}</strong>
-                  <div className="meta">{r.video_title}</div>
-                </td>
-                <td className="meta">
-                  {parseFloat(r.source_in_s).toFixed(1)}s – {parseFloat(r.source_out_s).toFixed(1)}s
-                </td>
-                <td><Link href={`/variants/${r.variant_id}`} style={{ textDecoration: "underline" }}>{r.label} · {r.variant_name}</Link></td>
-                <td><span className="badge">{r.status}</span></td>
-                <td>
-                  {r.render_status ? (
-                    <span
-                      className={`badge ${
-                        r.render_status === "done" ? "ready"
-                        : r.render_status === "failed" ? "failed" : "working"
-                      }`}
-                      title={r.render_error ?? undefined}
-                    >
-                      {r.render_status}
-                    </span>
-                  ) : (
-                    <span className="meta">—</span>
-                  )}
-                </td>
-                <td className="meta">{r.export_uri ?? "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      <Topbar
+        title="Clip builder"
+        sub="Each variant is one ad. Renders land in R2 as exports/<variant>/<ratio>.mp4."
+      />
+      <section className="screen">
+        <h2 className="sec">Clips</h2>
+        {rows.length === 0 && (
+          <div className="card qempty">
+            No clips yet — open a video and select a passage.
+          </div>
+        )}
+        {rows.length > 0 && (
+          <div className="card">
+            <table className="ads">
+              <thead>
+                <tr>
+                  <th>Clip</th><th>Source range</th><th>Variant</th>
+                  <th>Approval</th><th>Render</th><th>Export</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.variant_id}>
+                    <td>
+                      <strong>{r.clip_name ?? "untitled clip"}</strong>
+                      <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                        {r.video_title}
+                      </div>
+                    </td>
+                    <td className="mono" style={{ fontSize: 11 }}>
+                      {parseFloat(r.source_in_s).toFixed(1)}s –{" "}
+                      {parseFloat(r.source_out_s).toFixed(1)}s
+                    </td>
+                    <td>
+                      <Link
+                        href={`/variants/${r.variant_id}`}
+                        style={{ textDecoration: "underline" }}
+                      >
+                        {r.label} · {r.variant_name}
+                      </Link>
+                    </td>
+                    <td><span className="tag">{r.status}</span></td>
+                    <td>
+                      {r.render_status ? (
+                        <span
+                          className={renderTag(r.render_status)}
+                          title={r.render_error ?? undefined}
+                        >
+                          {r.render_status}
+                        </span>
+                      ) : (
+                        <span style={{ color: "var(--faint)" }}>—</span>
+                      )}
+                    </td>
+                    <td className="mono" style={{ fontSize: 10.5, color: "var(--muted)" }}>
+                      {r.export_uri ?? "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </>
   );
 }

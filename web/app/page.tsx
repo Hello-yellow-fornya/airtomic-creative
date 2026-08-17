@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { q } from "@/lib/db";
+import { Topbar } from "./ui";
 
 export const dynamic = "force-dynamic";
 
@@ -14,10 +15,10 @@ type VideoRow = {
   n_scenes: string;
 };
 
-function badgeClass(status: string) {
-  if (status === "ready") return "badge ready";
-  if (status === "failed") return "badge failed";
-  return "badge working";
+function statusTag(status: string) {
+  if (status === "ready") return "tag ok";
+  if (status === "failed") return "tag flag";
+  return "tag";
 }
 
 function fmtDur(s: string | null) {
@@ -38,23 +39,44 @@ export default async function VideosPage() {
 
   return (
     <>
-      <h1>Videos</h1>
-      <p className="sub">Ingested source videos. Open one to browse the transcript and cut clips.</p>
-      {videos.length === 0 && <p className="hint">Nothing ingested yet.</p>}
-      {videos.map((v) => (
-        <Link key={v.id} href={`/videos/${v.id}`}>
-          <div className="card">
-            <div className="row">
-              <strong>{v.title ?? "untitled"}</strong>
-              <span className={badgeClass(v.status)}>{v.status}</span>
-            </div>
-            <div className="meta">
-              {fmtDur(v.duration_s)} · {v.n_words} words · {v.n_scenes} scenes
-              {v.status_detail ? ` · ${v.status_detail}` : ""}
-            </div>
-          </div>
-        </Link>
-      ))}
+      <Topbar
+        title="Library"
+        sub="Long-form source material. Open a video to browse the transcript and cut clips."
+      />
+      <section className="screen">
+        <h2 className="sec">Long-form source</h2>
+        {videos.length === 0 && (
+          <div className="card qempty">Nothing ingested yet.</div>
+        )}
+        <div className="grid-assets">
+          {videos.map((v) => (
+            <Link key={v.id} href={`/videos/${v.id}`} className="card asset">
+              <div className="thumb">
+                <div className="head" />
+                <div className="head b" />
+                <span className="dur mono">{fmtDur(v.duration_s)}</span>
+              </div>
+              <div className="asset-meta">
+                <h3>{v.title ?? "untitled"}</h3>
+                <div className="m">
+                  {v.n_words} words · {v.n_scenes} scenes
+                </div>
+                <div style={{ marginTop: 7 }}>
+                  <span
+                    className={statusTag(v.status)}
+                    title={v.status_detail ?? undefined}
+                  >
+                    {v.status}
+                    {v.status_detail && v.status !== "ready"
+                      ? ` · ${v.status_detail}`
+                      : ""}
+                  </span>
+                </div>
+              </div>
+            </Link>
+          ))}
+        </div>
+      </section>
     </>
   );
 }
