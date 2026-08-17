@@ -99,3 +99,17 @@ def upload_file(s3, bucket: str, key: str, src_path: str, content_type: str) -> 
 
 def get_bytes(s3, bucket: str, key: str) -> bytes:
     return s3.get_object(Bucket=bucket, Key=key)["Body"].read()
+
+
+def delete_prefix(s3, bucket: str, prefix: str) -> int:
+    """Delete every object under a prefix. Returns the count removed.
+    Empty prefix listings are a no-op, so retries are safe."""
+    deleted = 0
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        keys = [{"Key": obj["Key"]} for obj in page.get("Contents", [])]
+        if not keys:
+            continue
+        s3.delete_objects(Bucket=bucket, Delete={"Objects": keys, "Quiet": True})
+        deleted += len(keys)
+    return deleted

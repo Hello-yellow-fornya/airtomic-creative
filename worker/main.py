@@ -14,7 +14,7 @@ import threading
 import time
 import traceback
 
-from . import config, db, ingest, pipeline, r2, render, scene_detect, tag, webapp
+from . import cleanup, config, db, ingest, pipeline, r2, render, scene_detect, tag, webapp
 
 log = logging.getLogger("worker")
 
@@ -23,6 +23,7 @@ HANDLERS = {
     "scene_detect": scene_detect.handle,
     "tag": tag.handle,
     "render": render.handle,
+    "cleanup": cleanup.handle,
 }
 # Every ingest-pipeline stage shares one failure hook: mark the video failed.
 # Render failures stay on the job row (the variant has no failed state).
