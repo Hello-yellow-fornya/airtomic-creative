@@ -159,6 +159,21 @@ button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
 .tx-x w{cursor:pointer;border-radius:2px;padding:0 1px}
 .tx-x w:hover{background:#FFEDB8}
 .tx-x w.insel{background:var(--ink);color:#fff}
+/* iOS-style text selection handles, inline in the transcript */
+.thandle{display:inline-flex;align-items:center;justify-content:center;
+  width:9px;height:19px;border-radius:2px;background:var(--ink);
+  vertical-align:-4px;cursor:ew-resize;touch-action:none;margin:0 2px;
+  position:relative;flex:none;user-select:none}
+.thandle::before{content:"";width:2px;height:9px;background:rgba(255,255,255,.55);border-radius:1px}
+.thandle::after{content:"";position:absolute;left:-8px;right:-8px;top:-6px;bottom:-6px}
+.thandle:hover{background:#000}
+.thandle.dragging{background:#000;box-shadow:0 0 0 2px rgba(255,198,41,.55);pointer-events:none}
+
+.selhint{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  font-family:'JetBrains Mono',monospace;font-size:10px;color:rgba(255,255,255,.62);
+  pointer-events:none;white-space:nowrap}
+.sel.hassel .selhint{display:none}
+
 @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
 </style>
 
@@ -232,6 +247,7 @@ button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
           <div class="mask" id="mR" style="right:0;width:0"></div>
           <div class="win" id="win"><div class="hnd l" id="hL"></div><div class="hnd r" id="hR"></div></div>
           <div class="ph" id="wph" style="left:0"></div>
+          <span class="selhint">drag across to select</span>
         </div>
         <div class="scale"><span id="w0">0:00</span><span id="w1">0:00</span></div>
         <div class="selbar">
@@ -247,7 +263,7 @@ button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
         <h2>Transcript</h2>
         <label class="follow"><input type="checkbox" id="followChk" checked> Follow playhead</label>
         <span style="flex:1"></span>
-        <span style="font-size:11px;color:var(--muted)">Click a line to scrub. Click a word, then another, to select.</span>
+        <span style="font-size:11px;color:var(--muted)">Drag across the text to select, like highlighting. Drag the black handles to adjust.</span>
       </div>
       <div class="txbox" id="tx"></div>
     </div>
@@ -339,7 +355,7 @@ const LINES=(()=>{
   return out.sort((a,b)=>a[0]-b[0]);
 })();
 
-let T=724, IN=724, OUT=751.6, playing=false, rate=1, raf=null, last=0, firstWord=null, follow=true;
+let T=724, IN=724, OUT=751.6, playing=false, rate=1, raf=null, last=0, firstWord=null, follow=true, tDrag=null;
 
 const shade=(i,lo,hi)=>{
   lo=lo||24; hi=hi||52;
@@ -366,7 +382,14 @@ function lineHTML(L,i){
   const words=x.split(" ");
   const wh=words.map((w,wi)=>{
     const wt=t+(wi/words.length)*(lineEnd(i)-t);
-    return `<w data-t="${wt.toFixed(2)}" class="${wt>=IN&&wt<=OUT?'insel':''}">${w}</w>`;
+    const step=(lineEnd(i)-t)/words.length;
+    const ins=wt>=IN&&wt<=OUT;
+    // a handle sits at each edge of the selected run
+    const isFirst = ins && (wt-step < IN || wt-step < 0);
+    const isLast  = ins && (wt+step > OUT);
+    return (isFirst?'<b class="thandle" data-h="l"></b>':'')
+      + `<w data-t="${wt.toFixed(2)}" class="${ins?'insel':''}">${w}</w>`
+      + (isLast?'<b class="thandle" data-h="r"></b>':'');
   }).join(" ");
   return `<div class="tx-l ${now?'now':''}" data-t="${t}" data-i="${i}">
     <div class="tx-t">${hms(t)}</div><div class="tx-s">${spk}</div><div class="tx-x">${wh}</div></div>`;
@@ -389,18 +412,129 @@ function paintTx(){
     }
   }
   $("#tx").innerHTML=html;
+  WORDGEO=null;
   $$(".tx-l").forEach(l=>l.addEventListener("click",e=>{
-    if(e.target.tagName==="W")return; seek(+l.dataset.t)}));
-  $$(".tx-x w").forEach(w=>w.addEventListener("click",()=>{
-    const t=+w.dataset.t;
-    if(firstWord===null){firstWord=t;IN=t;OUT=t+.1}
-    else{IN=Math.min(firstWord,t);OUT=Math.max(firstWord,t);firstWord=null}
-    seek(IN)}));
+    if(e.target.closest("w")||e.target.closest(".thandle"))return;
+    seek(+l.dataset.t)}));
   $$("[data-load]").forEach(b=>b.addEventListener("click",e=>{
     e.stopPropagation();
     const r=RECS.find(x=>x.id===+b.dataset.load); IN=r.s;OUT=r.e;seek(r.s)}));
+  wireTextHandles();
   if(follow) scrollToNow();
 }
+/* Drag the pills at either end of the highlighted text, like iOS selection.
+   The word under the pointer becomes the new edge. */
+/* ---- text selection: press, drag, release — like highlighting text ----
+   Hit detection is geometric, not elementFromPoint: we find the nearest word
+   to the pointer, so dragging between lines, over the timestamp gutter or
+   past the end of a line never drops the gesture. */
+let WORDGEO=null, tDragMode=null, anchorT=null, dragRaf=null, dragX=0, dragY=0, autoScroll=0;
+
+function buildWordGeo(){
+  const box=$("#tx");
+  WORDGEO=$$(".tx-x w").map(el=>({
+    el, t:+el.dataset.t,
+    top:el.offsetTop, bottom:el.offsetTop+el.offsetHeight,
+    left:el.offsetLeft, right:el.offsetLeft+el.offsetWidth,
+    on:el.classList.contains("insel")
+  }));
+  return WORDGEO;
+}
+function wordAt(clientX,clientY){
+  if(!WORDGEO||!WORDGEO.length) buildWordGeo();
+  const box=$("#tx"), r=box.getBoundingClientRect();
+  const x=clientX-r.left+box.scrollLeft;
+  const y=clientY-r.top+box.scrollTop;
+  let best=null,bd=Infinity;
+  for(const g of WORDGEO){
+    // vertical distance dominates so we lock to the right line first
+    const dy = y<g.top ? g.top-y : y>g.bottom ? y-g.bottom : 0;
+    const dx = x<g.left ? g.left-x : x>g.right ? x-g.right : 0;
+    const d = dy*1000 + dx;
+    if(d<bd){bd=d;best=g}
+  }
+  return best;
+}
+
+function applyDrag(){
+  dragRaf=null;
+  if(!tDragMode)return;
+  const g=wordAt(dragX,dragY);
+  if(g){
+    const t=g.t;
+    if(tDragMode==="new"){ IN=Math.min(anchorT,t); OUT=Math.max(anchorT,t)+0.4 }
+    else if(tDragMode==="l"){ IN=Math.min(t,OUT-0.4) }
+    else { OUT=Math.max(t,IN+0.4) }
+    fastPaint();
+  }
+  // auto-scroll when dragging near the edges, as text selection does
+  if(autoScroll){ $("#tx").scrollTop += autoScroll; WORDGEO&&null }
+  if(tDragMode) dragRaf=requestAnimationFrame(applyDrag);
+}
+
+function fastPaint(){
+  if(!WORDGEO) buildWordGeo();
+  let first=null,lastw=null;
+  for(const g of WORDGEO){
+    const ins = g.t>=IN && g.t<=OUT;
+    if(ins!==g.on){ g.el.classList.toggle("insel",ins); g.on=ins }
+    if(ins){ if(!first)first=g.el; lastw=g.el }
+  }
+  const hL=document.querySelector('.thandle[data-h="l"]');
+  const hR=document.querySelector('.thandle[data-h="r"]');
+  if(first&&lastw&&hL&&hR){
+    if(first.previousElementSibling!==hL) first.parentNode.insertBefore(hL,first);
+    if(lastw.nextElementSibling!==hR) lastw.parentNode.insertBefore(hR,lastw.nextSibling);
+  }
+  $("#selmeta").innerHTML=`${hms(IN)} → ${hms(OUT)} <em>· ${(OUT-IN).toFixed(1)}s · ~${Math.round((OUT-IN)*2.1)} words</em>`;
+}
+
+function startTextDrag(mode,e){
+  tDragMode=mode; tDrag=mode;
+  frozenRange=selRange();
+  followWas=follow; follow=false;
+  buildWordGeo();
+  dragX=e.clientX; dragY=e.clientY;
+  document.body.style.userSelect="none";
+  if(!dragRaf) dragRaf=requestAnimationFrame(applyDrag);
+}
+function endTextDrag(){
+  if(!tDragMode)return;
+  tDragMode=null; tDrag=null; anchorT=null; autoScroll=0;
+  frozenRange=null;
+  if(dragRaf){cancelAnimationFrame(dragRaf);dragRaf=null}
+  document.body.style.userSelect="";
+  $$(".thandle").forEach(h=>h.classList.remove("dragging"));
+  if(followWas!==undefined) follow=followWas;
+  seek(IN); paintTx();
+}
+let followWas;
+
+/* one set of listeners on the container, so they survive every repaint */
+(function(){
+  const box=$("#tx");
+  box.addEventListener("pointerdown",e=>{
+    const h=e.target.closest(".thandle");
+    if(h){ h.classList.add("dragging"); startTextDrag(h.dataset.h,e); e.preventDefault(); return }
+    const w=e.target.closest("w");
+    if(w){
+      anchorT=+w.dataset.t; IN=anchorT; OUT=anchorT+0.4;
+      startTextDrag("new",e); fastPaint(); e.preventDefault(); return;
+    }
+  });
+  window.addEventListener("pointermove",e=>{
+    if(!tDragMode)return;
+    dragX=e.clientX; dragY=e.clientY;
+    const r=box.getBoundingClientRect(), edge=34;
+    autoScroll = e.clientY < r.top+edge ? -14
+               : e.clientY > r.bottom-edge ? 14 : 0;
+  });
+  window.addEventListener("pointerup",endTextDrag);
+  window.addEventListener("pointercancel",endTextDrag);
+})();
+
+function wireTextHandles(){ WORDGEO=null }
+
 function scrollToNow(){
   const box=$("#tx");
   let line=box.querySelector(".tx-l.now");
@@ -411,7 +545,7 @@ function scrollToNow(){
       const d=Math.abs(+l.dataset.t-T); if(d<bd){bd=d;best=l}});
     line=best;
   }
-  if(!line||!box.scrollTo)return;
+  if(!line||!box.scrollTo||tDrag)return;
   const bt=box.getBoundingClientRect().top, lt=line.getBoundingClientRect().top;
   const target = box.scrollTop + (lt-bt) - box.clientHeight/2 + line.offsetHeight/2;
   box.scrollTo({top:Math.max(0,target),behavior:playing?"smooth":"auto"});
@@ -419,7 +553,19 @@ function scrollToNow(){
 $("#followChk").addEventListener("change",e=>{follow=e.target.checked; if(follow)scrollToNow()});
 
 /* selection strip */
-function selRange(){return [Math.max(0,IN-12),Math.min(DUR,OUT+12)]}
+/* The detail strip is a window around the PLAYHEAD, widened to hold the
+   selection when it is nearby. So scrubbing the top strip moves it. */
+let frozenRange=null;   // held while dragging so the window can't slide under the cursor
+function selRange(){
+  if(frozenRange) return frozenRange;
+  const selNear = OUT>T-90 && IN<T+90;
+  const span = selNear ? Math.max(50,(OUT-IN)+24) : 50;
+  let a,b;
+  if(selNear){ const mid=(Math.min(IN,T)+Math.max(OUT,T))/2; a=mid-span/2; b=mid+span/2 }
+  else { a=T-span/2; b=T+span/2 }
+  if(a<0){b-=a;a=0} if(b>DUR){a-=(b-DUR);b=DUR}
+  return [Math.max(0,a),Math.min(DUR,b)];
+}
 function paintSel(){
   const rg=selRange(), a=rg[0], b=rg[1], sp=b-a;
   $("#wframes").innerHTML=Array.from({length:20},(_,i)=>{
@@ -427,10 +573,40 @@ function paintSel(){
     return `<i style="background:${shade(i,ins?34:22,ins?60:40)}"></i>`}).join("");
   $("#w0").textContent=mmss(a); $("#w1").textContent=mmss(b);
   const l=(IN-a)/sp*100, r=(OUT-a)/sp*100;
-  $("#win").style.left=l+"%"; $("#win").style.width=(r-l)+"%";
-  $("#mL").style.width=l+"%"; $("#mR").style.width=(100-r)+"%";
+  const vis = OUT>a && IN<b;
+  $("#sel").classList.toggle("hassel",vis);
+  $("#win").style.display=vis?"":"none";
+  if(vis){
+    const cl=Math.max(l,0), cr=Math.min(r,100);
+    $("#win").style.left=cl+"%"; $("#win").style.width=(cr-cl)+"%";
+    $("#mL").style.width=cl+"%"; $("#mR").style.width=(100-cr)+"%";
+    $("#hL").style.display = l<0 ? "none" : "";
+    $("#hR").style.display = r>100 ? "none" : "";
+  } else {
+    $("#mL").style.width="0%"; $("#mR").style.width="0%";
+  }
   $("#wph").style.left=((Math.min(Math.max(T,a),b)-a)/sp*100)+"%";
   $("#selmeta").innerHTML=`${hms(IN)} → ${hms(OUT)} <em>· ${(OUT-IN).toFixed(1)}s · ~${Math.round((OUT-IN)*2.1)} words</em>`;
+}
+
+/* While a text handle is held we must not re-render the transcript —
+   replacing innerHTML destroys the element holding pointer capture and
+   the drag dies on the first move. Update in place instead. */
+function refreshSelectionInPlace(){
+  const words=$$(".tx-x w");
+  words.forEach(w=>w.classList.toggle("insel", +w.dataset.t>=IN && +w.dataset.t<=OUT));
+  const sel=words.filter(w=>w.classList.contains("insel"));
+  const hL=document.querySelector('.thandle[data-h="l"]');
+  const hR=document.querySelector('.thandle[data-h="r"]');
+  if(sel.length && hL && hR){
+    const a=sel[0], b=sel[sel.length-1];
+    if(a.previousElementSibling!==hL) a.parentNode.insertBefore(hL,a);
+    if(b.nextElementSibling!==hR) b.parentNode.insertBefore(hR,b.nextSibling);
+  }
+  $$(".tx-l").forEach(l=>{
+    const i=+l.dataset.i;
+    l.classList.toggle("now", T>=+l.dataset.t && T<lineEnd(i));
+  });
 }
 
 function seek(t){
@@ -446,7 +622,8 @@ function seek(t){
   $("#vspk").style.background=a?"var(--spkA)":"var(--spkB)";
   $("#vid").querySelector(".who.t").style.opacity=a?1:.4;
   $("#vid").querySelector(".who.b").style.opacity=a?.4:1;
-  paintSel(); paintTx();
+  paintSel();
+  if(!tDrag) paintTx();
 }
 
 /* scrubber */
@@ -470,18 +647,41 @@ function seek(t){
     return a+Math.max(0,Math.min(1,(x-r.left)/r.width))*(b-a)};
   [["#hL","l"],["#hR","r"]].forEach(pair=>{
     const s=pair[0], m=pair[1];
-    $(s).addEventListener("pointerdown",e=>{mode=m;try{$(s).setPointerCapture(e.pointerId)}catch(_){}
-      e.preventDefault();e.stopPropagation()});
+    $(s).addEventListener("pointerdown",e=>{
+      mode=m; frozenRange=selRange();      // lock the window for the whole gesture
+      try{$(s).setPointerCapture(e.pointerId)}catch(_){}
+      e.preventDefault(); e.stopPropagation();
+    });
     $(s).addEventListener("pointermove",e=>{
-      if(mode!==m)return; const t=at(e.clientX);
-      if(m==="l"){IN=Math.min(t,OUT-1);seek(IN)}else{OUT=Math.max(t,IN+1);seek(OUT)}});
-    const up=e=>{mode=null;try{$(s).releasePointerCapture(e.pointerId)}catch(_){}};
+      if(mode!==m)return;
+      const t=at(e.clientX);
+      // each handle moves only its own edge, in either direction
+      if(m==="l"){ IN=Math.max(frozenRange[0],Math.min(t,OUT-1)); seek(IN) }
+      else       { OUT=Math.min(frozenRange[1],Math.max(t,IN+1)); seek(OUT) }
+    });
+    const up=e=>{
+      if(mode!==m)return;
+      mode=null; frozenRange=null;
+      try{$(s).releasePointerCapture(e.pointerId)}catch(_){}
+      seek(T);
+    };
     $(s).addEventListener("pointerup",up); $(s).addEventListener("pointercancel",up);
   });
+  let anchor=null;
   el.addEventListener("pointerdown",e=>{
     if(e.target.closest(".hnd"))return;
-    const rg=selRange(),a=rg[0],b=rg[1],r=el.getBoundingClientRect();
-    seek(a+Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*(b-a))});
+    frozenRange=selRange();
+    anchor=at(e.clientX);
+    try{el.setPointerCapture(e.pointerId)}catch(_){}
+    seek(anchor);
+  });
+  el.addEventListener("pointermove",e=>{
+    if(anchor===null||mode)return;
+    const t=at(e.clientX);
+    if(Math.abs(t-anchor)>0.6){ IN=Math.min(anchor,t); OUT=Math.max(anchor,t); seek(t) }
+  });
+  const relEl=e=>{anchor=null;frozenRange=null;try{el.releasePointerCapture(e.pointerId)}catch(_){}seek(T)};
+  el.addEventListener("pointerup",relEl); el.addEventListener("pointercancel",relEl);
 })();
 
 $("#clearSel").addEventListener("click",()=>{firstWord=null;IN=T;OUT=T+8;seek(T)});

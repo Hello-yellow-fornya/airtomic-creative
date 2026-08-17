@@ -836,3 +836,21 @@ table.ads .bar i{display:block;height:100%;background:var(--teal)}
 .tx-l.now{background:#FFF0C6;box-shadow:inset 3px 0 0 var(--rose)}
 .tx-l .tx-t{font-size:10px}
 .tx-l .tx-s{font-size:9.5px;font-family:var(--font-mono),monospace}
+
+/* Find v2: text-selection handles (overlay pills at the selected run's
+   edges) + detail-strip hint. Handles match the video trim furniture. */
+.thandle{position:absolute;display:flex;align-items:center;justify-content:center;
+  width:9px;height:19px;border-radius:2px;background:var(--ink);
+  cursor:ew-resize;touch-action:none;z-index:5;user-select:none}
+.thandle::before{content:"";width:2px;height:9px;background:rgba(255,255,255,.55);border-radius:1px}
+.thandle::after{content:"";position:absolute;left:-8px;right:-8px;top:-6px;bottom:-6px}
+.thandle:hover{background:#000}
+.thandle.dragging{background:#000;box-shadow:0 0 0 2px rgba(255,198,41,.55);pointer-events:none}
+.thandle[data-hide="1"]{display:none}
+
+.selhint{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  font-family:var(--font-mono),monospace;font-size:10px;color:rgba(255,255,255,.62);
+  pointer-events:none;white-space:nowrap}
+.selstrip.hassel .selhint{display:none}
+.txbox{user-select:none}
+.tx-x .w{cursor:pointer}
