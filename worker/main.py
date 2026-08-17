@@ -14,7 +14,7 @@ import threading
 import time
 import traceback
 
-from . import config, db, ingest, r2
+from . import config, db, ingest, r2, webapp
 
 log = logging.getLogger("worker")
 
@@ -107,9 +107,19 @@ def main() -> None:
     log.info("worker up: %s thread(s), polling every %ss",
              cfg.concurrency, cfg.poll_interval_s)
 
+    server = None
+    if cfg.ingest_token:
+        server = webapp.make_server(cfg)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        log.info("web trigger listening on :%s", cfg.port)
+    else:
+        log.info("INGEST_TOKEN not set — web trigger disabled")
+
     while not _stop.is_set():
         _stop.wait(1)
     log.info("shutting down")
+    if server is not None:
+        server.shutdown()
     for t in threads:
         t.join(timeout=30)
 

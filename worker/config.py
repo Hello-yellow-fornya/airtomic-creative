@@ -15,6 +15,8 @@ class Config:
     modal_token: str
     poll_interval_s: float
     concurrency: int
+    ingest_token: str | None   # gates the web trigger; unset disables it
+    port: int                  # Railway injects PORT
 
 
 def _require(name: str) -> str:
@@ -36,4 +38,6 @@ def load() -> Config:
         modal_token=_require("MODAL_TOKEN"),
         poll_interval_s=int(os.environ.get("WORKER_POLL_INTERVAL_MS", "2000")) / 1000,
         concurrency=int(os.environ.get("WORKER_CONCURRENCY", "2")),
+        ingest_token=os.environ.get("INGEST_TOKEN") or None,
+        port=int(os.environ.get("PORT", "8080")),
     )

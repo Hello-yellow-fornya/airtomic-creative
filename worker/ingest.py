@@ -1,13 +1,21 @@
-"""The `ingest` job: source video in R2 → transcript rows in Postgres.
+"""The `ingest` job: source video → R2 → transcript rows in Postgres.
 
-Steps: download source, probe metadata, extract 16kHz mono WAV, park the WAV
-in R2, hand Modal a presigned URL, then write transcripts /
-transcript_segments / transcript_words in one transaction.
+The video row's storage_uri is either r2:// (uploaded directly) or http(s)://
+(URL ingest — the primary path). URL sources are fetched with yt-dlp, which
+handles both direct media files and podcast/video page URLs, then archived to
+R2 first — Meta and most hosts serve short-lived URLs, so we never depend on
+the source URL again (see CLAUDE.md known traps). storage_uri is rewritten to
+the R2 copy at that point, which also makes a retried job skip the re-fetch.
+
+Then: probe metadata, extract 16kHz mono WAV, park the WAV in R2, hand Modal
+a presigned URL, and write transcripts / transcript_segments /
+transcript_words in one transaction.
 
 Idempotent: a re-run replaces the video's transcripts rather than appending,
 so a retried or double-claimed job can't leave duplicates.
 """
 
+import mimetypes
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -33,14 +41,28 @@ def handle(conn: psycopg.Connection, cfg: Config, s3, job: dict[str, Any]) -> No
     if video is None:
         raise IngestError(f"video {video_id} not found")
 
-    _set_status(conn, video_id, "transcribing", "downloading source")
-    bucket, key = r2.parse_uri(video["storage_uri"])
-
     with tempfile.TemporaryDirectory(prefix="ingest-") as tmp:
-        src_path = str(Path(tmp) / Path(key).name)
         wav_path = str(Path(tmp) / "audio.wav")
+        storage_uri = video["storage_uri"]
 
-        r2.download_file(s3, bucket, key, src_path)
+        if storage_uri.startswith(("http://", "https://")):
+            _set_status(conn, video_id, "transcribing", "fetching source from url")
+            src_path = _fetch_source(storage_uri, tmp)
+            key = f"sources/{video_id}/{Path(src_path).name}"
+            content_type = (
+                mimetypes.guess_type(src_path)[0] or "application/octet-stream"
+            )
+            _set_status(conn, video_id, "transcribing", "archiving source to r2")
+            r2.upload_file(s3, cfg.r2_bucket, key, src_path, content_type)
+            conn.execute(
+                "UPDATE videos SET storage_uri = %s WHERE id = %s",
+                (r2.make_uri(cfg.r2_bucket, key), video_id),
+            )
+        else:
+            _set_status(conn, video_id, "transcribing", "downloading source")
+            bucket, key = r2.parse_uri(storage_uri)
+            src_path = str(Path(tmp) / Path(key).name)
+            r2.download_file(s3, bucket, key, src_path)
 
         meta = media.probe(src_path)
         conn.execute(
@@ -79,6 +101,31 @@ def on_permanent_failure(conn: psycopg.Connection, job: dict[str, Any], error: s
     video_id = job["payload"].get("video_id")
     if video_id:
         _set_status(conn, video_id, "failed", error[:500])
+
+
+def _fetch_source(url: str, dest_dir: str) -> str:
+    """Download a remote source with yt-dlp — handles direct .mp4/.mp3 links
+    and podcast/video page URLs alike. Returns the local file path."""
+    import yt_dlp
+
+    opts = {
+        "outtmpl": str(Path(dest_dir) / "source.%(ext)s"),
+        "format": "bv*+ba/b",          # best video+audio, else best single file
+        "merge_output_format": "mp4",
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+    }
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            ydl.extract_info(url, download=True)
+    except yt_dlp.utils.DownloadError as exc:
+        raise IngestError(f"could not fetch source url: {exc}") from exc
+
+    files = sorted(Path(dest_dir).glob("source.*"))
+    if not files:
+        raise IngestError("fetch produced no file")
+    return str(files[0])
 
 
 def _set_status(conn: psycopg.Connection, video_id: str, status: str, detail: str) -> None:

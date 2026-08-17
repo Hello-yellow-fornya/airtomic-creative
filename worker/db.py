@@ -71,6 +71,30 @@ def retry_or_fail_job(conn: psycopg.Connection, job: dict[str, Any], error: str)
     return False
 
 
+def create_video_and_ingest_job(
+    conn: psycopg.Connection,
+    *,
+    storage_uri: str,
+    title: str | None,
+    source: str,
+    uploaded_by: str | None,
+    video_id: str | None = None,
+) -> tuple[str, int]:
+    """storage_uri may be r2:// (already uploaded) or http(s):// — the ingest
+    handler fetches URL sources into R2 itself."""
+    with conn.transaction():
+        row = conn.execute(
+            """
+            INSERT INTO videos (id, source, title, storage_uri, status, uploaded_by)
+            VALUES (coalesce(%s, uuid_generate_v4()), %s, %s, %s, 'queued', %s)
+            RETURNING id
+            """,
+            (video_id, source, title, storage_uri, uploaded_by),
+        ).fetchone()
+        job_id = enqueue_job(conn, "ingest", {"video_id": str(row["id"])})
+    return str(row["id"]), job_id
+
+
 def enqueue_job(
     conn: psycopg.Connection, job_type: str, payload: dict[str, Any]
 ) -> int:

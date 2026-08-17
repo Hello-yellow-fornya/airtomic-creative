@@ -44,18 +44,42 @@ pip install -r worker/requirements.txt    # plus ffmpeg on the machine
 python -m worker.main
 ```
 
-On Railway: deploy with `worker/Dockerfile`, build context at the repo root.
+On Railway:
+
+1. New Project → Deploy from GitHub repo → pick this repo and branch.
+2. Service Settings → Build: Builder **Dockerfile**, Dockerfile path
+   `worker/Dockerfile`. Leave the root directory at `/` — the build context
+   must be the repo root or the worker package won't copy.
+3. Variables: `DATABASE_URL`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
+   `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `MODAL_TRANSCRIBE_URL`,
+   `MODAL_TOKEN`, `INGEST_TOKEN`. Railway injects `PORT` itself.
+4. Settings → Networking → **Generate Domain** so the web trigger is
+   reachable. Logs should show `worker up` and `web trigger listening`.
 
 ### Ingest a video
+
+**From a URL (primary):** open `https://<worker-domain>/?key=<INGEST_TOKEN>`
+in a browser, paste a source URL — a direct .mp4/.mp3 link or an episode
+page (fetched with yt-dlp) — and submit. The page lists recent videos with
+live status. Or hit the endpoint directly:
+
+```bash
+curl -X POST https://<worker-domain>/ingest \
+  -d "key=<INGEST_TOKEN>" -d "url=https://example.com/ep12.mp4" -d "title=Ep 12"
+```
+
+**From a local file:**
 
 ```bash
 python scripts/upload_video.py path/to/podcast.mp4 --title "Ep 12"
 ```
 
-Uploads to R2 via presigned URLs (multipart above 64 MiB), inserts the
-`videos` row, and queues an `ingest` job. The worker picks it up: probes
-metadata, extracts 16kHz mono WAV, transcribes on Modal, writes
-`transcripts` / `transcript_segments` / `transcript_words`.
+Uploads to R2 via presigned URLs (multipart above 64 MiB).
+
+Either way the `videos` row is inserted and an `ingest` job queued. The
+worker picks it up: fetches/archives the source into R2, probes metadata,
+extracts 16kHz mono WAV, transcribes on Modal, writes `transcripts` /
+`transcript_segments` / `transcript_words`.
 
 ## Constraints worth knowing before you touch anything
 

@@ -75,15 +75,14 @@ def main() -> None:
     upload_via_presigned(s3, cfg.r2_bucket, key, args.file, content_type)
 
     conn = db.connect(cfg.database_url)
-    conn.execute(
-        """
-        INSERT INTO videos (id, source, title, storage_uri, status, uploaded_by)
-        VALUES (%s, %s, %s, %s, 'queued', %s)
-        """,
-        (video_id, args.source, args.title or args.file.stem,
-         r2.make_uri(cfg.r2_bucket, key), args.by),
+    video_id, job_id = db.create_video_and_ingest_job(
+        conn,
+        storage_uri=r2.make_uri(cfg.r2_bucket, key),
+        title=args.title or args.file.stem,
+        source=args.source,
+        uploaded_by=args.by,
+        video_id=video_id,
     )
-    job_id = db.enqueue_job(conn, "ingest", {"video_id": video_id})
 
     print(f"video {video_id} queued as job {job_id}")
 
