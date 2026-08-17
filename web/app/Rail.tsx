@@ -12,7 +12,7 @@ const STEPS: {
   match: (path: string) => boolean;
 }[] = [
   { idx: "01", label: "Library", href: "/", match: (p) => p === "/" },
-  { idx: "02", label: "Transcript", match: (p) => p.startsWith("/videos/") },
+  { idx: "02", label: "Find", match: (p) => p.startsWith("/videos/") },
   { idx: "03", label: "Suggested cuts", href: "/cuts", match: (p) => p === "/cuts" },
   {
     idx: "04",

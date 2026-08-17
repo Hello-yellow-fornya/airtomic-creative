@@ -4,6 +4,26 @@ import { UUID_RE } from "@/lib/worker";
 
 export const dynamic = "force-dynamic";
 
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  if (!UUID_RE.test(id))
+    return NextResponse.json({ error: "bad id" }, { status: 400 });
+  const body = await req.json().catch(() => ({}));
+  if (body.title === undefined)
+    return NextResponse.json({ error: "title required" }, { status: 400 });
+  const title = body.title === null ? null : String(body.title).slice(0, 200);
+  const res = await pool.query(
+    "UPDATE videos SET title = $1 WHERE id = $2 RETURNING id",
+    [title, id],
+  );
+  if (!res.rowCount)
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  return NextResponse.json({ ok: true });
+}
+
 /** Dismiss a FAILED ingest: delete the video row (nothing downstream
  * exists for a failed pipeline) and clean its archived source + extracted
  * audio out of R2 via the worker's cleanup job. Refuses any other status —

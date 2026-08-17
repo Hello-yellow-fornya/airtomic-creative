@@ -1,0 +1,502 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Find screen — redesign</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+<style>
+:root{
+  --paper:#F5F4F0; --surface:#FFFFFF; --ink:#15161A; --muted:#6C6E74; --faint:#9A9CA2;
+  --line:#E3E1DB; --line2:#EFEDE7; --signal:#FFC629; --deep:#C99400;
+  --rose:#C4436E; --spkA:#25627F; --spkB:#8FA6B4; --r:3px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--paper);color:var(--ink);font-family:Inter,system-ui,sans-serif;
+  font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+.mono{font-family:'JetBrains Mono',monospace;font-variant-numeric:tabular-nums}
+.eyebrow{font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--faint);font-weight:500}
+
+.app{display:grid;grid-template-columns:186px 1fr;min-height:100vh}
+.rail{background:var(--ink);color:#EDECE8;padding:17px 0;position:sticky;top:0;height:100vh}
+.brand{padding:0 16px 15px;border-bottom:1px solid #2A2C31;margin-bottom:11px}
+.brand b{font-family:Archivo,sans-serif;font-weight:700;font-size:14.5px;display:flex;align-items:center;gap:7px}
+.dot{width:8px;height:8px;background:var(--signal);border-radius:50%}
+.brand span{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.12em;
+  text-transform:uppercase;color:#7C7E85;margin-top:5px;padding-left:15px;display:block}
+.nav{display:flex;flex-direction:column;gap:1px;padding:0 9px}
+.nav-l{padding:10px 8px 5px;font-family:'JetBrains Mono',monospace;font-size:9px;
+  letter-spacing:.12em;text-transform:uppercase;color:#66686F}
+.nav-i{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:var(--r);
+  color:#B9BABF;font-size:12.5px;width:100%;text-align:left}
+.nav-i.on{background:#2C2E35;color:#fff;font-weight:500}
+.nav-i.on .n{color:var(--signal)}
+.n{font-family:'JetBrains Mono',monospace;font-size:10px;color:#5E6067;width:14px}
+
+.main{min-width:0}
+.top{background:var(--surface);border-bottom:1px solid var(--line);padding:10px 22px;
+  display:flex;align-items:flex-end;justify-content:space-between;gap:14px;flex-wrap:wrap}
+.top h1{font-family:Archivo,sans-serif;font-size:17px;font-weight:600;letter-spacing:-.02em}
+.top p{color:var(--muted);font-size:11px;margin-top:1px}
+.body{padding:13px 22px 40px}
+
+.btn{border:1px solid var(--ink);background:var(--ink);color:#fff;padding:6px 12px;
+  border-radius:var(--r);font-size:12px;font-weight:500}
+.btn.ghost{background:transparent;color:var(--ink);border-color:var(--line)}
+.btn.signal{background:var(--signal);border-color:var(--signal);color:var(--ink);font-weight:600}
+.btn.sm{padding:4px 9px;font-size:11px}
+.tag{display:inline-block;padding:2px 7px;border-radius:2px;font-size:10.5px;background:var(--paper);
+  border:1px solid var(--line);color:var(--muted);font-family:'JetBrains Mono',monospace}
+.tag.hot{background:#FFF6DC;border-color:#F0DCA0;color:#7A5A00}
+.tag.flag{background:#FDF0F4;border-color:#F0CEDA;color:#9A2F53}
+
+/* ---------- player ---------- */
+.stage{background:var(--ink);border-radius:var(--r) var(--r) 0 0;padding:10px;
+  display:flex;justify-content:center;align-items:center}
+.vid{position:relative;height:230px;aspect-ratio:9/16;border-radius:2px;overflow:hidden;flex:none;
+  background:linear-gradient(160deg,#2E3644,#4C566A 45%,#7A8699)}
+.vid .who{position:absolute;left:0;right:0;height:50%;display:flex;align-items:center;
+  justify-content:center;transition:opacity .15s}
+.vid .who.t{top:0;background:linear-gradient(150deg,#3A2F35,#6B565E)}
+.vid .who.b{top:50%;background:linear-gradient(150deg,#2C3A38,#55706B)}
+.vid .face{width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,.26)}
+.vid .live{position:absolute;top:7px;left:7px;background:rgba(0,0,0,.6);color:#fff;
+  font-family:'JetBrains Mono',monospace;font-size:9.5px;padding:2px 6px;border-radius:2px}
+.vid .spk-badge{position:absolute;bottom:7px;left:7px;font-family:'JetBrains Mono',monospace;
+  font-size:9.5px;padding:2px 6px;border-radius:2px;color:#fff}
+.cutmark{position:absolute;inset:0;border:2px solid var(--signal);pointer-events:none;display:none}
+.vid.incut .cutmark{display:block}
+.cutmark span{position:absolute;top:6px;right:6px;background:var(--signal);color:var(--ink);
+  font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;padding:2px 6px;border-radius:2px}
+.transport{background:var(--surface);border:1px solid var(--line);border-top:none;
+  border-radius:0 0 var(--r) var(--r);padding:7px 10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tb{width:28px;height:28px;border:1px solid var(--line);border-radius:var(--r);display:flex;
+  align-items:center;justify-content:center;background:var(--surface);flex:none}
+.tb.pri{background:var(--ink);border-color:var(--ink)}
+.tb.pri svg{fill:#fff}
+.tb svg{width:11px;height:11px;fill:var(--ink);display:block}
+.tc{font-size:11px;color:var(--muted);white-space:nowrap}
+.tc b{color:var(--ink);font-weight:500;font-family:'JetBrains Mono',monospace}
+.spd{padding:3px 6px;border:1px solid var(--line);border-radius:2px;background:var(--surface);
+  font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted)}
+.spd[data-on="1"]{background:var(--ink);border-color:var(--ink);color:#fff;font-weight:700}
+
+/* ---------- strip 1: full source scrubber ---------- */
+.scrub-wrap{margin-top:11px}
+.scrub{position:relative;height:36px;border-radius:var(--r) var(--r) 0 0;overflow:hidden;
+  background:var(--ink);cursor:pointer;touch-action:none;user-select:none}
+.scrub .frames{position:absolute;inset:0;display:flex}
+.scrub .frames i{flex:1;border-right:1px solid rgba(0,0,0,.3)}
+.scrub .cut{position:absolute;top:0;bottom:0;background:rgba(255,198,41,.6);
+  border-left:1.5px solid var(--deep);border-right:1.5px solid var(--deep);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;min-width:14px;transition:background .12s}
+.scrub .cut:hover{background:rgba(255,198,41,.88)}
+.scrub .cut[data-on="1"]{background:var(--signal);box-shadow:inset 0 0 0 2px var(--ink)}
+.scrub .cut b{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;
+  color:var(--ink);pointer-events:none}
+.scrub .ph{position:absolute;top:0;bottom:0;width:2px;background:var(--rose);pointer-events:none;z-index:4}
+.scrub .ph::before{content:"";position:absolute;top:-3px;left:-4px;width:10px;height:10px;
+  background:var(--rose);border-radius:50%}
+.spkstrip{position:relative;height:9px;background:var(--ink);border-radius:0 0 var(--r) var(--r);overflow:hidden}
+.spk{position:absolute;top:1px;bottom:1px;border-radius:1px}
+.spk.a{background:var(--spkA)}.spk.b{background:var(--spkB)}
+.scale{display:flex;justify-content:space-between;margin-top:4px}
+.scale span{font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--faint)}
+.legend{display:flex;gap:14px;font-size:10.5px;color:var(--muted);flex-wrap:wrap;margin-top:3px}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;vertical-align:middle;margin-right:4px}
+
+/* ---------- strip 2: selection ---------- */
+.selwrap{margin-top:11px}
+.sel{position:relative;height:48px;border-radius:var(--r);overflow:hidden;background:var(--ink);
+  touch-action:none;user-select:none}
+.sel .frames{position:absolute;inset:0;display:flex}
+.sel .frames i{flex:1;border-right:1px solid rgba(0,0,0,.3)}
+.mask{position:absolute;top:0;bottom:0;background:rgba(10,10,12,.7);pointer-events:none}
+.win{position:absolute;top:0;bottom:0;border-top:3px solid var(--signal);border-bottom:3px solid var(--signal)}
+.hnd{position:absolute;top:-3px;bottom:-3px;width:15px;background:var(--signal);cursor:ew-resize;
+  display:flex;align-items:center;justify-content:center;touch-action:none}
+.hnd::after{content:"";width:2px;height:15px;background:rgba(0,0,0,.42);border-radius:1px}
+.hnd.l{left:-15px;border-radius:3px 0 0 3px}
+.hnd.r{right:-15px;border-radius:0 3px 3px 0}
+.sel .ph{position:absolute;top:0;bottom:0;width:2px;background:#fff;pointer-events:none;
+  box-shadow:0 0 4px rgba(0,0,0,.5)}
+.selbar{display:flex;align-items:center;gap:10px;padding:8px 11px;background:var(--ink);color:#fff;
+  border-radius:var(--r);margin-top:7px;flex-wrap:wrap}
+.selbar .m{font-family:'JetBrains Mono',monospace;font-size:11.5px}
+.selbar .m em{font-style:normal;color:#9A9CA2}
+
+/* ---------- transcript: full width, follows the playhead ---------- */
+.txhead{display:flex;align-items:center;gap:10px;margin:16px 0 7px;flex-wrap:wrap}
+.txhead h2{font-family:Archivo,sans-serif;font-size:13px;font-weight:600}
+.follow{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);cursor:pointer}
+.txbox{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);
+  max-height:340px;overflow-y:auto;position:relative;padding:4px 0}
+
+/* a cut is a box drawn around its lines, inside one continuous transcript */
+.cutbox{position:relative;margin:9px 8px;border:1.5px solid var(--signal);border-radius:var(--r);
+  background:#FFFDF6;padding-top:20px}
+.cutbox.sel{background:#FFFAEC;box-shadow:0 0 0 2px rgba(255,198,41,.35)}
+.cutbox .cl{position:absolute;top:-1px;left:-1px;display:flex;align-items:center;gap:7px;
+  background:var(--signal);border-radius:2px 0 var(--r) 0;padding:2px 9px 2px 8px}
+.cutbox .cl b{font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:700;color:var(--ink)}
+.cutbox .cl span{font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#6B5200}
+.cutbox .cl button{font-size:10px;font-weight:600;color:var(--ink);text-decoration:underline;
+  text-underline-offset:2px}
+.cutbox .why{font-size:11px;color:#7A6430;padding:5px 11px 3px;line-height:1.45}
+
+.tx-l{display:grid;grid-template-columns:60px 62px 1fr;gap:9px;padding:6px 11px;
+  border-bottom:1px solid var(--line2);cursor:pointer}
+.cutbox .tx-l{border-bottom-color:#F3E7C8}
+.cutbox .tx-l:last-child{border-bottom:none}
+.tx-l:hover{background:var(--paper)}
+.cutbox .tx-l:hover{background:#FFF6DC}
+.tx-l.now{background:#FFF0C6;box-shadow:inset 3px 0 0 var(--rose)}
+.tx-t{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--faint)}
+.tx-s{font-size:9.5px;font-weight:600;color:var(--muted);font-family:'JetBrains Mono',monospace}
+.tx-x{font-size:12.5px;line-height:1.55}
+.tx-x w{cursor:pointer;border-radius:2px;padding:0 1px}
+.tx-x w:hover{background:#FFEDB8}
+.tx-x w.insel{background:var(--ink);color:#fff}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+</style>
+
+<div class="app">
+  <aside class="rail">
+    <div class="brand"><b><span class="dot"></span>Creative Builder</b><span>Klira · Hello Yellow</span></div>
+    <nav class="nav">
+      <div class="nav-l">Workflow</div>
+      <button class="nav-i"><span class="n">01</span>Library</button>
+      <button class="nav-i on"><span class="n">02</span>Find</button>
+      <button class="nav-i"><span class="n">03</span>Build</button>
+      <button class="nav-i"><span class="n">04</span>Queue</button>
+    </nav>
+  </aside>
+
+  <div class="main">
+    <header class="top">
+      <div>
+        <h1>Barrier repair, with Dr Emma Craythorne</h1>
+        <p class="mono">47:12 · 214 scenes · 2 speakers · 6 suggested cuts</p>
+      </div>
+      <button class="btn ghost sm">Rename</button>
+    </header>
+
+    <div class="body">
+      <!-- player -->
+      <div class="stage">
+        <div class="vid" id="vid">
+          <div class="who t"><span class="face"></span></div>
+          <div class="who b"><span class="face"></span></div>
+          <span class="live mono" id="vtime">00:00</span>
+          <span class="spk-badge" id="vspk" style="background:var(--spkA)">SPEAKER_01</span>
+          <div class="cutmark"><span id="cutlabel">CUT 1</span></div>
+        </div>
+      </div>
+      <div class="transport">
+        <button class="tb pri" id="play"><svg viewBox="0 0 12 12" id="pi"><path d="M2 1l9 5-9 5z"/></svg></button>
+        <button class="tb" id="stop"><svg viewBox="0 0 12 12"><rect x="2" y="2" width="8" height="8"/></svg></button>
+        <span class="tc"><b id="now">00:00</b> / <span class="mono">47:12</span></span>
+        <span style="flex:1"></span>
+        <div style="display:flex;gap:3px">
+          <button class="spd" data-s="0.5">0.5×</button>
+          <button class="spd" data-s="1" data-on="1">1×</button>
+          <button class="spd" data-s="2">2×</button>
+          <button class="spd" data-s="4">4×</button>
+        </div>
+      </div>
+
+      <!-- full source -->
+      <div class="scrub-wrap">
+        <div class="scrub" id="scrub">
+          <div class="frames" id="sframes"></div>
+          <div id="scuts"></div>
+          <div class="ph" id="sph" style="left:0"></div>
+        </div>
+        <div class="spkstrip" id="spkstrip"></div>
+        <div class="scale"><span>0:00</span><span>11:48</span><span>23:36</span><span>35:24</span><span>47:12</span></div>
+        <div class="legend">
+          <span><i style="background:var(--spkA)"></i>Dr Craythorne</span>
+          <span><i style="background:var(--spkB)"></i>Chloe (host)</span>
+          <span><i style="background:var(--signal)"></i>Machine-suggested cut — click to load</span>
+        </div>
+      </div>
+
+      <!-- selection -->
+      <div class="selwrap">
+        <div class="eyebrow" style="margin-bottom:4px">Selection — drag the handles, or pick words in the transcript</div>
+        <div class="sel" id="sel">
+          <div class="frames" id="wframes"></div>
+          <div class="mask" id="mL" style="left:0;width:0"></div>
+          <div class="mask" id="mR" style="right:0;width:0"></div>
+          <div class="win" id="win"><div class="hnd l" id="hL"></div><div class="hnd r" id="hR"></div></div>
+          <div class="ph" id="wph" style="left:0"></div>
+        </div>
+        <div class="scale"><span id="w0">0:00</span><span id="w1">0:00</span></div>
+        <div class="selbar">
+          <span class="m" id="selmeta"></span>
+          <span style="flex:1"></span>
+          <button class="btn ghost sm" id="clearSel" style="color:#fff;border-color:rgba(255,255,255,.3)">Clear</button>
+          <button class="btn signal sm" id="makeClip">Create clip</button>
+        </div>
+      </div>
+
+      <!-- transcript -->
+      <div class="txhead">
+        <h2>Transcript</h2>
+        <label class="follow"><input type="checkbox" id="followChk" checked> Follow playhead</label>
+        <span style="flex:1"></span>
+        <span style="font-size:11px;color:var(--muted)">Click a line to scrub. Click a word, then another, to select.</span>
+      </div>
+      <div class="txbox" id="tx"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+const DUR=2832;
+const mmss=t=>`${Math.floor(t/60)}:${String(Math.floor(t%60)).padStart(2,"0")}`;
+const hms=t=>`${String(Math.floor(t/3600)).padStart(2,"0")}:${String(Math.floor(t%3600/60)).padStart(2,"0")}:${String(Math.floor(t%60)).padStart(2,"0")}`;
+const pct=t=>t/DUR*100;
+
+const RECS=[
+ {id:1,s:724,e:751.6,rank:1,score:.91,
+  why:"Direct reassurance open — the pattern in your three highest-thumbstop creatives.",
+  n:9,stat:"7 of 9 above median thumbstop"},
+ {id:2,s:1096,e:1131,rank:2,score:.84,
+  why:"Contrarian setup. Two ads used this shape; both held above 40%.",
+  n:2,stat:"n=2 — weak evidence"},
+ {id:3,s:1580,e:1618,rank:3,score:.79,
+  why:"Emotional open, no product in the first eight seconds.",
+  n:5,stat:"4 of 5 above median hold"},
+ {id:4,s:1902,e:1919,rank:4,score:.71,
+  why:"Names a concern in the first line. In six of your top ten by ROAS.",
+  n:6,stat:"6 of 10 top-ROAS share this"},
+ {id:5,s:2210,e:2231,rank:5,score:.64,
+  why:"Numeric hook. Thin evidence — from category norms, not Klira data.",
+  n:1,stat:"n=1 — treat as unranked"},
+ {id:6,s:2544,e:2566,rank:6,score:.58,
+  why:"Strong line, references prescription status. Compliance flag raised.",
+  n:3,stat:"3 comparable ads",flag:true}
+];
+
+/* one continuous transcript across the whole source */
+const KEY=[
+ [640,"SPK 00","Right, let's start where most people start — confused."],
+ [652,"SPK 01","Most people come to me having tried nine things at once."],
+ [666,"SPK 00","And none of them working."],
+ [678,"SPK 01","Or all of them working against each other, which looks the same from the outside."],
+ [694,"SPK 00","So where do you begin?"],
+ [706,"SPK 01","I take everything away. It sounds drastic and it isn't."],
+ [724,"SPK 01","Your barrier isn't broken. It's just been through a lot."],
+ [733,"SPK 01","Tightness after cleansing, stinging from things that never stung — that's the signal."],
+ [745,"SPK 01","Give it three weeks of doing less and most people are surprised."],
+ [758,"SPK 00","Doing less feels counterintuitive when you've spent money on a routine."],
+ [772,"SPK 01","It does. But the routine is often the thing causing it."],
+ [1096,"SPK 00","Let's talk retinol, because that's the one that scares people."],
+ [1103,"SPK 01","Everyone asks me about retinol. Almost nobody asks what makes it tolerable."],
+ [1118,"SPK 01","Which is barrier support. Get that right and tolerance stops being the issue."],
+ [1131,"SPK 00","So it's sequencing rather than strength."],
+ [1580,"SPK 00","Does it come up much, the emotional side?"],
+ [1588,"SPK 01","I've had patients cry in my clinic over their skin. It isn't vanity."],
+ [1602,"SPK 01","You're carrying it on your face. There's nowhere to put it down."],
+ [1618,"SPK 00","That's stayed with me since we last spoke."],
+ [1902,"SPK 01","Purging and breaking out look identical. The difference is where, and how long."],
+ [1919,"SPK 00","And if it's somewhere you don't usually break out?"],
+ [2210,"SPK 01","If your routine has nine steps, at least four are working against each other."],
+ [2231,"SPK 00","That's going to upset some people."],
+ [2544,"SPK 01","You don't need a prescription to start. You need to stop causing it."],
+ [2566,"SPK 00","That feels like the right place to end."]
+];
+/* filler so the transcript is continuous end to end, as a real one would be */
+const FILL=[
+ "It's a fair question, and the answer changes depending on where you're starting from.",
+ "That's the bit people skip, and it's usually the bit that matters.",
+ "I see it every week in clinic, honestly.",
+ "There's no shortcut to it — it just takes a bit of patience.",
+ "And that's before we even get to the actives.",
+ "Most of the time it's simpler than people expect.",
+ "You'd be surprised how often that's the whole problem.",
+ "Which is why I always ask what they were using before.",
+ "It's not that the product is bad. It's that it's wrong for right now.",
+ "People want a routine. What they need is a rest.",
+ "That comes up more than anything else, actually.",
+ "And there's a lot of noise online about it.",
+ "The evidence is better than people think, to be fair.",
+ "But you have to give it long enough to work."
+];
+const LINES=(()=>{
+  const out=[...KEY];
+  let t=8;
+  let f=0, who=0;
+  while(t<DUR){
+    const clash=KEY.some(k=>Math.abs(k[0]-t)<26);
+    if(!clash){ out.push([t, who?"SPK 01":"SPK 00", FILL[f++%FILL.length]]); who^=1 }
+    t += 13 + Math.round(Math.abs(Math.sin(t))*9);
+  }
+  return out.sort((a,b)=>a[0]-b[0]);
+})();
+
+let T=724, IN=724, OUT=751.6, playing=false, rate=1, raf=null, last=0, firstWord=null, follow=true;
+
+const shade=(i,lo,hi)=>{
+  lo=lo||24; hi=hi||52;
+  const l=lo+((Math.sin(i*1.9)+1)/2)*(hi-lo);
+  return `linear-gradient(150deg,hsl(216 17% ${l}%),hsl(210 15% ${l+15}%))`;
+};
+$("#sframes").innerHTML=Array.from({length:46},(_,i)=>`<i style="background:${shade(i)}"></i>`).join("");
+$("#scuts").innerHTML=RECS.map(r=>
+  `<div class="cut" data-cut="${r.id}" style="left:${pct(r.s)}%;width:${Math.max(pct(r.e-r.s),1.2)}%"
+    title="Cut ${r.rank} · ${hms(r.s)} → ${hms(r.e)} · n=${r.n}"><b>${r.rank}</b></div>`).join("");
+let sh="",c=0,who=0;
+while(c<DUR){const len=28+Math.abs(Math.sin(c))*95;
+  sh+=`<div class="spk ${who?'b':'a'}" style="left:${pct(c)}%;width:${pct(Math.min(len,DUR-c))}%"></div>`;
+  c+=len+2;who^=1}
+$("#spkstrip").innerHTML=sh;
+
+function lineEnd(i){return LINES[i+1]?LINES[i+1][0]:DUR}
+const cutAt=t=>RECS.find(r=>t>=r.s&&t<r.e);
+
+/* transcript: one continuous list, cuts drawn as boxes around their lines */
+function lineHTML(L,i){
+  const t=L[0], spk=L[1], x=L[2];
+  const now = T>=t && T<lineEnd(i);
+  const words=x.split(" ");
+  const wh=words.map((w,wi)=>{
+    const wt=t+(wi/words.length)*(lineEnd(i)-t);
+    return `<w data-t="${wt.toFixed(2)}" class="${wt>=IN&&wt<=OUT?'insel':''}">${w}</w>`;
+  }).join(" ");
+  return `<div class="tx-l ${now?'now':''}" data-t="${t}" data-i="${i}">
+    <div class="tx-t">${hms(t)}</div><div class="tx-s">${spk}</div><div class="tx-x">${wh}</div></div>`;
+}
+function paintTx(){
+  let html="", i=0;
+  while(i<LINES.length){
+    const t=LINES[i][0], cut=RECS.find(r=>t>=r.s-1 && t<r.e);
+    if(cut){
+      const isSel = Math.abs(IN-cut.s)<1.5 && Math.abs(OUT-cut.e)<1.5;
+      let inner="";
+      while(i<LINES.length && LINES[i][0] < cut.e){ inner+=lineHTML(LINES[i],i); i++ }
+      html+=`<div class="cutbox ${isSel?'sel':''}" data-cutbox="${cut.id}">
+        <div class="cl"><b>CUT ${cut.rank}</b>
+          <span>${cut.flag?'compliance':'score '+cut.score.toFixed(2)} · n=${cut.n} · ${cut.stat}</span>
+          <button data-load="${cut.id}">Load</button></div>
+        <div class="why">${cut.why}</div>${inner}</div>`;
+    } else {
+      html+=lineHTML(LINES[i],i); i++;
+    }
+  }
+  $("#tx").innerHTML=html;
+  $$(".tx-l").forEach(l=>l.addEventListener("click",e=>{
+    if(e.target.tagName==="W")return; seek(+l.dataset.t)}));
+  $$(".tx-x w").forEach(w=>w.addEventListener("click",()=>{
+    const t=+w.dataset.t;
+    if(firstWord===null){firstWord=t;IN=t;OUT=t+.1}
+    else{IN=Math.min(firstWord,t);OUT=Math.max(firstWord,t);firstWord=null}
+    seek(IN)}));
+  $$("[data-load]").forEach(b=>b.addEventListener("click",e=>{
+    e.stopPropagation();
+    const r=RECS.find(x=>x.id===+b.dataset.load); IN=r.s;OUT=r.e;seek(r.s)}));
+  if(follow) scrollToNow();
+}
+function scrollToNow(){
+  const box=$("#tx");
+  let line=box.querySelector(".tx-l.now");
+  if(!line){
+    // playhead sits outside any line — go to the nearest one so the view never strands
+    let best=null,bd=1e9;
+    box.querySelectorAll(".tx-l").forEach(l=>{
+      const d=Math.abs(+l.dataset.t-T); if(d<bd){bd=d;best=l}});
+    line=best;
+  }
+  if(!line||!box.scrollTo)return;
+  const bt=box.getBoundingClientRect().top, lt=line.getBoundingClientRect().top;
+  const target = box.scrollTop + (lt-bt) - box.clientHeight/2 + line.offsetHeight/2;
+  box.scrollTo({top:Math.max(0,target),behavior:playing?"smooth":"auto"});
+}
+$("#followChk").addEventListener("change",e=>{follow=e.target.checked; if(follow)scrollToNow()});
+
+/* selection strip */
+function selRange(){return [Math.max(0,IN-12),Math.min(DUR,OUT+12)]}
+function paintSel(){
+  const rg=selRange(), a=rg[0], b=rg[1], sp=b-a;
+  $("#wframes").innerHTML=Array.from({length:20},(_,i)=>{
+    const t=a+(b-a)*(i/20), ins=t>=IN&&t<=OUT;
+    return `<i style="background:${shade(i,ins?34:22,ins?60:40)}"></i>`}).join("");
+  $("#w0").textContent=mmss(a); $("#w1").textContent=mmss(b);
+  const l=(IN-a)/sp*100, r=(OUT-a)/sp*100;
+  $("#win").style.left=l+"%"; $("#win").style.width=(r-l)+"%";
+  $("#mL").style.width=l+"%"; $("#mR").style.width=(100-r)+"%";
+  $("#wph").style.left=((Math.min(Math.max(T,a),b)-a)/sp*100)+"%";
+  $("#selmeta").innerHTML=`${hms(IN)} → ${hms(OUT)} <em>· ${(OUT-IN).toFixed(1)}s · ~${Math.round((OUT-IN)*2.1)} words</em>`;
+}
+
+function seek(t){
+  T=Math.max(0,Math.min(DUR,t));
+  $("#sph").style.left=pct(T)+"%";
+  $("#now").textContent=mmss(T); $("#vtime").textContent=mmss(T);
+  const cut=cutAt(T);
+  $("#vid").classList.toggle("incut",!!cut);
+  if(cut)$("#cutlabel").textContent="CUT "+cut.rank;
+  $$(".scrub .cut").forEach(e=>e.dataset.on=(cut&&e.dataset.cut===String(cut.id))?"1":"0");
+  const a=Math.floor(T/60)%2===0;
+  $("#vspk").textContent=a?"SPEAKER_01":"SPEAKER_00";
+  $("#vspk").style.background=a?"var(--spkA)":"var(--spkB)";
+  $("#vid").querySelector(".who.t").style.opacity=a?1:.4;
+  $("#vid").querySelector(".who.b").style.opacity=a?.4:1;
+  paintSel(); paintTx();
+}
+
+/* scrubber */
+(function(){
+  const el=$("#scrub"); let down=false;
+  const at=x=>{const r=el.getBoundingClientRect();
+    return Math.max(0,Math.min(1,(x-r.left)/r.width))*DUR};
+  el.addEventListener("pointerdown",e=>{
+    const cut=e.target.closest("[data-cut]");
+    if(cut){const r=RECS.find(x=>x.id===+cut.dataset.cut); IN=r.s;OUT=r.e;seek(r.s);return}
+    down=true; try{el.setPointerCapture(e.pointerId)}catch(_){} seek(at(e.clientX))});
+  el.addEventListener("pointermove",e=>{if(down)seek(at(e.clientX))});
+  const up=e=>{down=false;try{el.releasePointerCapture(e.pointerId)}catch(_){}};
+  el.addEventListener("pointerup",up); el.addEventListener("pointercancel",up);
+})();
+
+/* selection handles — dragging scrubs the player, iOS-style */
+(function(){
+  const el=$("#sel"); let mode=null;
+  const at=x=>{const rg=selRange(),a=rg[0],b=rg[1],r=el.getBoundingClientRect();
+    return a+Math.max(0,Math.min(1,(x-r.left)/r.width))*(b-a)};
+  [["#hL","l"],["#hR","r"]].forEach(pair=>{
+    const s=pair[0], m=pair[1];
+    $(s).addEventListener("pointerdown",e=>{mode=m;try{$(s).setPointerCapture(e.pointerId)}catch(_){}
+      e.preventDefault();e.stopPropagation()});
+    $(s).addEventListener("pointermove",e=>{
+      if(mode!==m)return; const t=at(e.clientX);
+      if(m==="l"){IN=Math.min(t,OUT-1);seek(IN)}else{OUT=Math.max(t,IN+1);seek(OUT)}});
+    const up=e=>{mode=null;try{$(s).releasePointerCapture(e.pointerId)}catch(_){}};
+    $(s).addEventListener("pointerup",up); $(s).addEventListener("pointercancel",up);
+  });
+  el.addEventListener("pointerdown",e=>{
+    if(e.target.closest(".hnd"))return;
+    const rg=selRange(),a=rg[0],b=rg[1],r=el.getBoundingClientRect();
+    seek(a+Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*(b-a))});
+})();
+
+$("#clearSel").addEventListener("click",()=>{firstWord=null;IN=T;OUT=T+8;seek(T)});
+
+/* transport */
+function setPlay(on){playing=on;
+  $("#pi").innerHTML=on?'<rect x="2" y="1.5" width="3" height="9"/><rect x="7" y="1.5" width="3" height="9"/>'
+    :'<path d="M2 1l9 5-9 5z"/>';
+  if(on){last=performance.now();raf=requestAnimationFrame(tick)}else if(raf){cancelAnimationFrame(raf);raf=null}}
+function tick(ts){if(!playing)return; seek(T+(ts-last)/1000*rate); last=ts;
+  if(T>=DUR)setPlay(false); if(playing)raf=requestAnimationFrame(tick)}
+$("#play").addEventListener("click",()=>setPlay(!playing));
+$("#stop").addEventListener("click",()=>{setPlay(false);seek(0)});
+$$(".spd").forEach(b=>b.addEventListener("click",()=>{
+  $$(".spd").forEach(o=>o.dataset.on="0");b.dataset.on="1";rate=+b.dataset.s}));
+
+seek(724);
+</script>
