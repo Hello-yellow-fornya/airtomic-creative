@@ -119,6 +119,7 @@ def render_variant(conn: psycopg.Connection, cfg: Config, s3, variant_id: str,
         {"word": w["word"], "start": float(w["start_s"]), "end": float(w["end_s"])}
         for w in words
     ]
+    _apply_fixes(word_dicts, clip["subtitle_overrides"] or {})
     out_words = subtitles.output_words(scenes, word_dicts)
     ass_path = str(Path(workdir) / "subs.ass")
     Path(ass_path).write_text(
@@ -168,8 +169,31 @@ def _load_preset(conn: psycopg.Connection, clip: dict[str, Any]) -> dict[str, An
             "ORDER BY created_at LIMIT 1"
         ).fetchone()
     preset = dict(row["config"]) if row else {}
-    overrides = clip["subtitle_overrides"] or {}
+    overrides = dict(clip["subtitle_overrides"] or {})
+    overrides.pop("fixes", None)  # word corrections, not style — applied to words
     return {**preset, **overrides}
+
+
+_PUNCT = ".,!?;:\"'"
+
+
+def _apply_fixes(word_dicts: list[dict[str, Any]], overrides: dict[str, Any]) -> None:
+    """Clip-scoped transcript corrections (subtitle_overrides.fixes:
+    {"wrong": "right"}). Case-insensitive whole-token match; trailing
+    punctuation survives the swap. The source transcript is untouched."""
+    fixes = {
+        str(k).lower(): str(v)
+        for k, v in (overrides.get("fixes") or {}).items()
+        if str(v).strip()
+    }
+    if not fixes:
+        return
+    for w in word_dicts:
+        token = w["word"].strip()
+        bare = token.rstrip(_PUNCT)
+        rep = fixes.get(bare.lower())
+        if rep:
+            w["word"] = rep + token[len(bare):]
 
 
 def default_crop(src_ar: float, window_ar: float) -> dict[str, float]:

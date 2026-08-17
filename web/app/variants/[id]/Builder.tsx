@@ -1,0 +1,1206 @@
+"use client";
+
+/** Clip builder — the prototype's 04 BUILD screen wired to real data.
+ * Direct-manipulation crop over the actual footage, filmstrip trim,
+ * transport, live caption preview from real word timings, drag-reorder
+ * scene rail, collapsible sidebar, variant rail with naming popover.
+ *
+ * Yellow is reserved for machine claims; every control here is a human
+ * action, so the only yellow on this screen is the trim handles' hardware
+ * (prototype chrome) and nothing interactive gains a yellow fill. */
+
+import {
+  useCallback, useEffect, useMemo, useRef, useState,
+} from "react";
+import { useRouter } from "next/navigation";
+
+type VariantInfo = {
+  id: string; label: string; name: string; status: string;
+  clipId: string; clipName: string | null; clipIn: number; clipOut: number;
+  presetId: string | null; overrides: Record<string, unknown>;
+  videoId: string; videoDuration: number; srcW: number; srcH: number;
+};
+type Sibling = { id: string; label: string; name: string; status: string; nScenes: number };
+type Scene = {
+  id: string; idx: number; layout: string; in: number | null; out: number | null;
+  dur: number | null; lifted: boolean; asset: string | null;
+  splitRatio: number; audio: string;
+};
+type Crop = { sceneId: string; ratio: string; x: number; y: number; w: number; h: number };
+type Asset = { id: string; name: string; kind: string };
+type Preset = { id: string; name: string; is_default: boolean; config: Record<string, unknown> };
+type Word = { w: string; s: number; e: number };
+
+const RATIOS: Record<string, { ar: number; label: string; px: string; use: string }> = {
+  "9x16": { ar: 9 / 16, label: "9:16", px: "1080×1920", use: "Reels, Stories" },
+  "4x5": { ar: 4 / 5, label: "4:5", px: "1080×1350", use: "Feed" },
+  "1x1": { ar: 1, label: "1:1", px: "1080×1080", use: "Feed, Explore" },
+  "1.91x1": { ar: 1.91, label: "1.91:1", px: "1200×628", use: "PMax, landscape" },
+};
+const SAFE: Record<string, { t: number; b: number; r: number }> = {
+  "9x16": { t: 14, b: 16, r: 12 },
+  "4x5": { t: 5, b: 9, r: 0 },
+  "1x1": { t: 9, b: 11, r: 0 },
+  "1.91x1": { t: 8, b: 8, r: 8 },
+};
+const LY_NAME: Record<string, string> = {
+  full: "Full", split_product: "Product", split_speakers: "Speakers", card: "End card",
+};
+const NAME_SUGS = ["Emotional hook", "Contrarian open", "Question open", "Product first", "Short cut", "No end card"];
+const MIN_CLIP = 3;
+
+type Style = {
+  fs: number; ol: number; vp: number; wpl: number; hl: string;
+  caps: boolean; box: boolean;
+};
+
+function cropBox(srcAr: number, ratio: string) {
+  const ar = RATIOS[ratio].ar;
+  return ar < srcAr
+    ? { w: ar / srcAr, h: 1, axis: "x" as const }
+    : { w: 1, h: srcAr / ar, axis: "y" as const };
+}
+const sceneDur = (s: Scene) =>
+  s.layout === "card" ? (s.dur ?? 2.5) : (s.out ?? 0) - (s.in ?? 0);
+
+const fmt = (t: number) => {
+  const h = String(Math.floor(t / 3600)).padStart(2, "0");
+  const m = String(Math.floor((t % 3600) / 60)).padStart(2, "0");
+  const s = String(Math.floor(t % 60)).padStart(2, "0");
+  const ms = String(Math.round((t % 1) * 1000)).padStart(3, "0");
+  return `${h}:${m}:${s}.${ms}`;
+};
+const mmss = (t: number) =>
+  `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
+const clock = (t: number) =>
+  `${String(Math.floor(t / 60)).padStart(2, "0")}:${(t % 60).toFixed(1).padStart(4, "0")}`;
+
+export default function Builder({
+  variant, siblings, scenes, crops, assets, presets, words, workerUp,
+}: {
+  variant: VariantInfo; siblings: Sibling[]; scenes: Scene[]; crops: Crop[];
+  assets: Asset[]; presets: Preset[]; words: Word[]; workerUp: boolean;
+}) {
+  const router = useRouter();
+  const srcAr = variant.srcW / Math.max(variant.srcH, 1);
+  const draft = variant.status === "draft";
+
+  const [sel, setSel] = useState(0);
+  const scene = scenes[Math.min(sel, Math.max(scenes.length - 1, 0))] as Scene | undefined;
+
+  const [bRatio, setBRatio] = useState("9x16");
+  const [zones, setZones] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // ----- trim state (persisted on handle release) -----
+  const [IN, setIN] = useState(variant.clipIn);
+  const [OUT, setOUT] = useState(variant.clipOut);
+  const ctx = useMemo<[number, number]>(() => {
+    const end = variant.videoDuration || variant.clipOut + 8;
+    return [Math.max(0, variant.clipIn - 8), Math.min(end, variant.clipOut + 8)];
+  // context window stays fixed for the session, like the prototype
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [variant.videoId]);
+
+  // ----- subtitle style -----
+  const activePreset =
+    presets.find((p) => p.id === variant.presetId) ??
+    presets.find((p) => p.is_default) ?? presets[0];
+  const seedStyle = useCallback((): Style => {
+    const c = { ...(activePreset?.config ?? {}), ...variant.overrides } as Record<string, unknown>;
+    return {
+      fs: Number(c.fs ?? 30), ol: Number(c.ol ?? 3), vp: Number(c.vp ?? 72),
+      wpl: Number(c.wpl ?? 4), hl: String(c.hl ?? "#FFC629"),
+      caps: !!c.caps, box: !!c.box,
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const [S, setS] = useState<Style>(seedStyle);
+  const [presetId, setPresetId] = useState<string | null>(activePreset?.id ?? null);
+  const [styleOv, setStyleOv] = useState<Record<string, unknown>>(() => {
+    const o = { ...variant.overrides };
+    delete o.fixes;
+    return o;
+  });
+  const [fixes, setFixes] = useState<Record<string, string>>(
+    () => ({ ...((variant.overrides.fixes as Record<string, string>) ?? {}) }),
+  );
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ----- playback -----
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [t, setT] = useState(0); // clip-relative
+  const [playing, setPlaying] = useState(false);
+  const [rate, setRate] = useState(1);
+  const [videoErr, setVideoErr] = useState(false);
+  const rafRef = useRef<number | null>(null);
+  const clipDur = OUT - IN;
+
+  const stopRaf = () => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+  };
+  const tickRaf = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const rel = v.currentTime - IN;
+    if (rel >= OUT - IN) {
+      v.pause();
+      v.currentTime = OUT;
+      setT(OUT - IN);
+      setPlaying(false);
+      stopRaf();
+      return;
+    }
+    setT(Math.max(0, rel));
+    rafRef.current = requestAnimationFrame(tickRaf);
+  }, [IN, OUT]);
+
+  const play = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.currentTime < IN || v.currentTime >= OUT - 0.05) v.currentTime = IN;
+    v.playbackRate = rate;
+    v.play().then(() => {
+      setPlaying(true);
+      stopRaf();
+      rafRef.current = requestAnimationFrame(tickRaf);
+    }).catch(() => setVideoErr(true));
+  }, [IN, OUT, rate, tickRaf]);
+  const pause = useCallback(() => {
+    videoRef.current?.pause();
+    setPlaying(false);
+    stopRaf();
+  }, []);
+  const seek = useCallback((rel: number) => {
+    const v = videoRef.current;
+    const clamped = Math.max(0, Math.min(OUT - IN, rel));
+    if (v) v.currentTime = IN + clamped;
+    setT(clamped);
+  }, [IN, OUT]);
+  useEffect(() => () => stopRaf(), []);
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.playbackRate = rate;
+  }, [rate]);
+
+  // space toggles playback
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.code !== "Space") return;
+      const tag = (document.activeElement as HTMLElement)?.tagName ?? "";
+      if (/^(INPUT|SELECT|TEXTAREA|BUTTON)$/.test(tag)) return;
+      e.preventDefault();
+      if (playing) pause(); else play();
+    };
+    document.addEventListener("keydown", h);
+    return () => document.removeEventListener("keydown", h);
+  }, [playing, play, pause]);
+
+  // ----- captions: real word timings, ASS-style line hold -----
+  const clipWords = useMemo(
+    () => words.filter((w) => w.e > IN && w.s < OUT),
+    [words, IN, OUT],
+  );
+  const lines = useMemo(() => {
+    const out: Word[][] = [];
+    for (let i = 0; i < clipWords.length; i += S.wpl)
+      out.push(clipWords.slice(i, i + S.wpl));
+    return out;
+  }, [clipWords, S.wpl]);
+  const tSrc = IN + t;
+  const lineIdx = useMemo(() => {
+    for (let i = lines.length - 1; i >= 0; i--)
+      if (tSrc >= lines[i][0].s) return i;
+    return -1;
+  }, [lines, tSrc]);
+  const line = lineIdx >= 0 ? lines[lineIdx] : null;
+
+  // ----- crop -----
+  const box = cropBox(srcAr, bRatio);
+  const [localCrops, setLocalCrops] = useState<Record<string, { x: number; y: number }>>({});
+  const cropKey = scene ? `${scene.id}:${bRatio}` : "";
+  const storedCrop = scene
+    ? crops.find((c) => c.sceneId === scene.id && c.ratio === bRatio)
+    : undefined;
+  const cropPos = localCrops[cropKey] ??
+    (storedCrop
+      ? { x: storedCrop.x, y: storedCrop.y }
+      : { x: box.axis === "x" ? (1 - box.w) / 2 : 0, y: box.axis === "y" ? (1 - box.h) / 2 : 0 });
+  const hasCropSet = (sceneId: string, ratio: string) =>
+    !!localCrops[`${sceneId}:${ratio}`] || crops.some((c) => c.sceneId === sceneId && c.ratio === ratio);
+
+  const srcRef = useRef<HTMLDivElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const dragStart = useRef({ px: 0, py: 0, x: 0, y: 0 });
+
+  async function saveCrop(pos: { x: number; y: number }) {
+    if (!scene) return;
+    const crop = box.axis === "x"
+      ? { x: pos.x, y: 0, w: box.w, h: box.h }
+      : { x: 0, y: pos.y, w: box.w, h: box.h };
+    await fetch(`/api/scenes/${scene.id}/crop`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ratio: bRatio, ...crop }),
+    });
+    router.refresh();
+  }
+
+  function onCropDown(e: React.PointerEvent) {
+    if (!scene || scene.layout === "card") return;
+    (e.target as Element).setPointerCapture(e.pointerId);
+    setDragging(true);
+    dragStart.current = { px: e.clientX, py: e.clientY, x: cropPos.x, y: cropPos.y };
+    e.preventDefault();
+  }
+  function onCropMove(e: React.PointerEvent) {
+    if (!dragging || !srcRef.current) return;
+    const r = srcRef.current.getBoundingClientRect();
+    const d = dragStart.current;
+    if (box.axis === "x") {
+      const x = Math.max(0, Math.min(1 - box.w, d.x + (e.clientX - d.px) / r.width));
+      setLocalCrops((m) => ({ ...m, [cropKey]: { x, y: 0 } }));
+    } else {
+      const y = Math.max(0, Math.min(1 - box.h, d.y + (e.clientY - d.py) / r.height));
+      setLocalCrops((m) => ({ ...m, [cropKey]: { x: 0, y } }));
+    }
+  }
+  function onCropUp(e: React.PointerEvent) {
+    if (!dragging) return;
+    setDragging(false);
+    try { (e.target as Element).releasePointerCapture(e.pointerId); } catch {}
+    void saveCrop(localCrops[cropKey] ?? cropPos);
+  }
+  function onCropKey(e: React.KeyboardEvent) {
+    if (!scene || scene.layout === "card") return;
+    const step = (e.shiftKey ? 5 : 1) / 100;
+    let next: { x: number; y: number } | null = null;
+    if (box.axis === "x") {
+      if (e.key === "ArrowLeft") next = { x: Math.max(0, cropPos.x - step), y: 0 };
+      if (e.key === "ArrowRight") next = { x: Math.min(1 - box.w, cropPos.x + step), y: 0 };
+    } else {
+      if (e.key === "ArrowUp") next = { x: 0, y: Math.max(0, cropPos.y - step) };
+      if (e.key === "ArrowDown") next = { x: 0, y: Math.min(1 - box.h, cropPos.y + step) };
+    }
+    if (next) {
+      e.preventDefault();
+      setLocalCrops((m) => ({ ...m, [cropKey]: next! }));
+      void saveCrop(next);
+    }
+  }
+
+  // ----- filmstrip -----
+  const [frames, setFrames] = useState<string[] | null>(null);
+  useEffect(() => {
+    if (!workerUp) return;
+    let dead = false;
+    const [a, b] = ctx;
+    const v = document.createElement("video");
+    v.crossOrigin = "anonymous";
+    v.muted = true;
+    v.preload = "auto";
+    v.src = `/api/media/${variant.videoId}`;
+    const canvas = document.createElement("canvas");
+    canvas.width = 96; canvas.height = 54;
+    const g = canvas.getContext("2d");
+    const grabbed: string[] = [];
+    const seekTo = (time: number) =>
+      new Promise<void>((res, rej) => {
+        v.onseeked = () => res();
+        v.onerror = () => rej(new Error("video error"));
+        v.currentTime = time;
+      });
+    (async () => {
+      try {
+        await new Promise<void>((res, rej) => {
+          v.onloadedmetadata = () => res();
+          v.onerror = () => rej(new Error("load failed"));
+        });
+        for (let i = 0; i < 16 && !dead; i++) {
+          await seekTo(a + ((b - a) * (i + 0.5)) / 16);
+          g?.drawImage(v, 0, 0, 96, 54);
+          grabbed.push(canvas.toDataURL("image/jpeg", 0.6));
+        }
+        if (!dead) setFrames(grabbed);
+      } catch {
+        /* CORS or load failure — keep the neutral gradient tiles */
+      }
+    })();
+    return () => { dead = true; v.src = ""; };
+  }, [variant.videoId, ctx, workerUp]);
+
+  const stripRef = useRef<HTMLDivElement>(null);
+  const [handleMode, setHandleMode] = useState<"l" | "r" | null>(null);
+  const timeAt = (clientX: number) => {
+    const [a, b] = ctx;
+    const r = stripRef.current!.getBoundingClientRect();
+    return a + Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * (b - a);
+  };
+  function onHandleMove(e: React.PointerEvent) {
+    if (!handleMode) return;
+    const time = timeAt(e.clientX);
+    if (handleMode === "l") setIN(Math.min(time, OUT - MIN_CLIP));
+    else setOUT(Math.max(time, IN + MIN_CLIP));
+  }
+  async function onHandleUp(e: React.PointerEvent) {
+    if (!handleMode) return;
+    setHandleMode(null);
+    try { (e.target as Element).releasePointerCapture(e.pointerId); } catch {}
+    setT((cur) => Math.min(cur, OUT - IN));
+    await fetch(`/api/clips/${variant.clipId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source_in_s: IN, source_out_s: OUT }),
+    });
+    router.refresh();
+  }
+
+  // ----- api helper -----
+  const call = useCallback(async (url: string, method: string, body?: unknown) => {
+    setBusy(true);
+    setNote(null);
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      setNote(err.error ?? res.statusText);
+      return null;
+    }
+    router.refresh();
+    return res.json().catch(() => ({}));
+  }, [router]);
+
+  // ----- subtitle persistence (debounced) -----
+  const persistStyle = useCallback((nextOv: Record<string, unknown>, nextFixes: Record<string, string>, nextPreset: string | null) => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      void fetch(`/api/clips/${variant.clipId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subtitle_preset_id: nextPreset,
+          subtitle_overrides: { ...nextOv, ...(Object.keys(nextFixes).length ? { fixes: nextFixes } : {}) },
+        }),
+      });
+    }, 500);
+  }, [variant.clipId]);
+
+  function setStyle(patch: Partial<Style>) {
+    const next = { ...S, ...patch };
+    setS(next);
+    const ov = { ...styleOv };
+    for (const [k, v] of Object.entries(patch)) ov[k] = v;
+    setStyleOv(ov);
+    persistStyle(ov, fixes, presetId);
+  }
+  function applyPreset(p: Preset) {
+    const c = p.config as Record<string, unknown>;
+    setPresetId(p.id);
+    setStyleOv({});
+    setS({
+      fs: Number(c.fs ?? 30), ol: Number(c.ol ?? 3), vp: Number(c.vp ?? 72),
+      wpl: Number(c.wpl ?? 4), hl: String(c.hl ?? "#FFC629"),
+      caps: !!c.caps, box: !!c.box,
+    });
+    persistStyle({}, fixes, p.id);
+  }
+  function addFix(from: string, to: string) {
+    const next = { ...fixes, [from.toLowerCase()]: to };
+    setFixes(next);
+    persistStyle(styleOv, next, presetId);
+  }
+  function dropFix(from: string) {
+    const next = { ...fixes };
+    delete next[from];
+    setFixes(next);
+    persistStyle(styleOv, next, presetId);
+  }
+  const fixWord = (w: string) => {
+    const bare = w.replace(/[.,!?;:"']+$/, "");
+    const rep = fixes[bare.toLowerCase()];
+    return rep ? rep + w.slice(bare.length) : w;
+  };
+
+  // ----- scene rail drag ----
+  const [dragFrom, setDragFrom] = useState<number | null>(null);
+  const [dragOver, setDragOver] = useState<{ i: number; left: boolean } | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const addBtnRef = useRef<HTMLButtonElement>(null);
+  const railRef = useRef<HTMLDivElement>(null);
+  const [menuPos, setMenuPos] = useState({ left: 0, top: 0 });
+
+  useEffect(() => {
+    const close = (e: MouseEvent) => {
+      const el = e.target as Element;
+      if (!el.closest(".addmenu") && !el.closest(".scn-add")) setMenuOpen(false);
+      if (!el.closest(".namer") && !el.closest(".var-add") && !el.closest("[data-var]")) setNamer(null);
+    };
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, []);
+
+  // ----- namer popover -----
+  const [namer, setNamer] = useState<{ mode: "add" | "rename"; target?: string; anchor: { left: number; top: number } } | null>(null);
+  const [namerVal, setNamerVal] = useState("");
+  const varRailRef = useRef<HTMLDivElement>(null);
+
+  function openNamer(mode: "add" | "rename", anchorEl: HTMLElement, target?: string) {
+    const w = varRailRef.current!.getBoundingClientRect();
+    const r = anchorEl.getBoundingClientRect();
+    setNamerVal(mode === "rename" ? siblings.find((s) => s.id === target)?.name ?? "" : "");
+    setNamer({
+      mode, target,
+      anchor: {
+        left: Math.max(0, Math.min(r.left - w.left, w.width - 254)),
+        top: r.bottom - w.top + 6,
+      },
+    });
+  }
+  async function commitNamer() {
+    if (!namer) return;
+    if (namer.mode === "add") {
+      const res = await call(`/api/clips/${variant.clipId}/variants`, "POST", {
+        name: namerVal.trim() || undefined,
+        copy_from: variant.id,
+      });
+      setNamer(null);
+      if (res?.variant_id) router.push(`/variants/${res.variant_id}`);
+    } else {
+      if (namerVal.trim())
+        await call(`/api/variants/${namer.target}`, "PATCH", { name: namerVal.trim() });
+      setNamer(null);
+    }
+  }
+
+  // ----- derived -----
+  const shape = useMemo(() => {
+    const sig = scenes.map((s) => s.layout);
+    const shapes: Record<string, string[]> = {
+      plain: ["full"],
+      product: ["full", "split_product"],
+      hookfirst: ["full", "split_product", "card"],
+    };
+    for (const k in shapes)
+      if (shapes[k].length === sig.length && shapes[k].every((l, i) => l === sig[i])) return k;
+    return "custom";
+  }, [scenes]);
+
+  const assetById = (id: string | null) => assets.find((a) => a.id === id);
+  const assetBg = (id: string | null) =>
+    id && workerUp ? { backgroundImage: `url(/api/assets/${id}/file)` } : undefined;
+
+  const sz = SAFE[bRatio];
+  const capFont = S.fs * 0.52;
+  const activePresetName = styleOv && Object.keys(styleOv).length
+    ? "Custom"
+    : presets.find((p) => p.id === presetId)?.name ?? "Custom";
+
+  const [a0, a1] = ctx;
+  const span = a1 - a0;
+  const winL = ((IN - a0) / span) * 100;
+  const winR = ((OUT - a0) / span) * 100;
+
+  // ================= render =================
+  return (
+    <div className="build">
+      <div>
+        <div className="prev-tools" style={{ margin: "0 0 10px" }}>
+          <div className="seg">
+            {Object.keys(RATIOS).map((r) => (
+              <button key={r} data-on={bRatio === r ? "1" : undefined}
+                onClick={() => setBRatio(r)}>
+                {RATIOS[r].label}
+                {scene && scene.layout !== "card" && hasCropSet(scene.id, r) ? " ●" : ""}
+              </button>
+            ))}
+          </div>
+          <label className="zone-tog">
+            <input type="checkbox" checked={zones} onChange={(e) => setZones(e.target.checked)} />
+            {" "}Safe zones
+          </label>
+          <span className="mono" style={{ fontSize: 10.5, color: "var(--faint)" }}>
+            {RATIOS[bRatio].use} · {RATIOS[bRatio].px}
+          </span>
+        </div>
+
+        <div className="stage">
+          <div className="src" ref={srcRef} style={{ aspectRatio: `${srcAr}` }}>
+            {workerUp && !videoErr ? (
+              <video
+                ref={videoRef}
+                src={`/api/media/${variant.videoId}`}
+                preload="metadata"
+                playsInline
+                onLoadedMetadata={() => { if (videoRef.current) videoRef.current.currentTime = IN + t; }}
+                onError={() => setVideoErr(true)}
+              />
+            ) : (
+              <div style={{
+                position: "absolute", inset: 0, display: "flex", alignItems: "center",
+                justifyContent: "center", color: "#7C7E85", fontSize: 11.5,
+                textAlign: "center", padding: 20,
+              }}>
+                {workerUp
+                  ? "Source video unavailable — has this video been archived to R2?"
+                  : "Worker not connected — set WORKER_URL and INGEST_TOKEN to play real footage."}
+              </div>
+            )}
+
+            {/* live captions */}
+            {line && scene?.layout !== "card" && (
+              <div className="cap" style={{
+                fontFamily: "var(--font-inter),sans-serif", fontWeight: 700,
+                lineHeight: 1.22, fontSize: capFont, color: "#fff",
+                letterSpacing: "-.01em",
+                top: `${S.vp}%`, transform: "translateY(-50%)",
+                textShadow: S.ol
+                  ? `0 0 ${S.ol}px #000,0 0 ${S.ol}px #000,0 ${S.ol / 2}px ${S.ol}px rgba(0,0,0,.6)`
+                  : "none",
+                ...(S.box
+                  ? { background: "rgba(0,0,0,.62)", padding: "5px 9px", borderRadius: 3 }
+                  : {}),
+              }}>
+                <div>
+                  {line.map((w, i) => (
+                    <b key={i} style={{ color: tSrc >= w.s && tSrc < w.e ? S.hl : "#fff" }}>
+                      {S.caps ? fixWord(w.w).toUpperCase() : fixWord(w.w)}{" "}
+                    </b>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* layout overlays for the selected scene */}
+            {scene && (scene.layout === "split_product" || scene.layout === "split_speakers") && (
+              <div
+                className={`lay-lower${scene.layout === "split_product" && scene.asset && workerUp ? " has-img" : ""}`}
+                style={{
+                  display: "flex",
+                  height: `${(1 - scene.splitRatio) * 100}%`,
+                  ...(scene.layout === "split_product" ? assetBg(scene.asset) : {}),
+                  ...(scene.layout === "split_speakers"
+                    ? { background: "linear-gradient(135deg,#3A4252,#6E7A8F)" } : {}),
+                }}
+              />
+            )}
+            {scene?.layout === "card" && (
+              <div
+                className={`lay-card${scene.asset && workerUp ? " has-img" : ""}`}
+                style={{ display: "flex", ...assetBg(scene.asset) }}
+              />
+            )}
+
+            {/* crop overlay — direct manipulation */}
+            {scene && scene.layout !== "card" && (
+              <div
+                className={`crop${dragging ? " drag" : ""}${zones ? " zones" : ""}`}
+                tabIndex={0}
+                role="slider"
+                aria-label="Reframe crop"
+                style={{
+                  width: `${box.w * 100}%`,
+                  height: `${box.h * 100}%`,
+                  left: `${(box.axis === "x" ? cropPos.x : 0) * 100}%`,
+                  top: `${(box.axis === "y" ? cropPos.y : 0) * 100}%`,
+                }}
+                onPointerDown={onCropDown}
+                onPointerMove={onCropMove}
+                onPointerUp={onCropUp}
+                onPointerCancel={onCropUp}
+                onKeyDown={onCropKey}
+              >
+                <div className="thirds">
+                  <i className="v" style={{ left: "33.33%" }} /><i className="v" style={{ left: "66.66%" }} />
+                  <i className="h" style={{ top: "33.33%" }} /><i className="h" style={{ top: "66.66%" }} />
+                </div>
+                <b className="br tl" /><b className="br tr" /><b className="br bl" /><b className="br br2" />
+                <div className="zone t" style={{ height: `${sz.t}%` }}><span>TOP</span></div>
+                <div className="zone b" style={{ height: `${sz.b}%` }}><span>BOTTOM</span></div>
+                <div className="crop-hint">
+                  drag to reframe · {RATIOS[bRatio].label}
+                  {box.axis === "y" ? " · vertical axis" : ""}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* filmstrip trim */}
+        <div className="strip" ref={stripRef}
+          onPointerDown={(e) => {
+            if ((e.target as Element).closest(".hnd")) return;
+            seek(timeAt(e.clientX) - IN);
+          }}>
+          <div className="frames">
+            {Array.from({ length: 16 }, (_, i) => {
+              const l = 26 + Math.sin(i * 1.7) * 7;
+              return (
+                <i key={i} style={frames
+                  ? { backgroundImage: `url(${frames[i]})` }
+                  : { background: `linear-gradient(150deg,hsl(218 18% ${l}%),hsl(212 16% ${l + 16}%))` }}
+                />
+              );
+            })}
+          </div>
+          <div className="mask" style={{ left: 0, width: `${winL}%` }} />
+          <div className="mask" style={{ right: 0, width: `${100 - winR}%` }} />
+          <div className="win" style={{ left: `${winL}%`, width: `${winR - winL}%` }}>
+            <div className="hnd l" role="slider" aria-label="Clip start"
+              onPointerDown={(e) => {
+                setHandleMode("l");
+                (e.target as Element).setPointerCapture(e.pointerId);
+                e.preventDefault(); e.stopPropagation();
+              }}
+              onPointerMove={onHandleMove}
+              onPointerUp={onHandleUp}
+              onPointerCancel={onHandleUp}
+            />
+            <div className="hnd r" role="slider" aria-label="Clip end"
+              onPointerDown={(e) => {
+                setHandleMode("r");
+                (e.target as Element).setPointerCapture(e.pointerId);
+                e.preventDefault(); e.stopPropagation();
+              }}
+              onPointerMove={onHandleMove}
+              onPointerUp={onHandleUp}
+              onPointerCancel={onHandleUp}
+            />
+          </div>
+          <div className="strip-ph" style={{ left: `${((IN + Math.min(t, clipDur) - a0) / span) * 100}%` }} />
+        </div>
+        <div className="strip-scale">
+          <span>{mmss(a0)}</span><span>{mmss(a1)}</span>
+        </div>
+
+        {/* variants */}
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginTop: 16 }}>
+          <div className="eyebrow">Variants</div>
+          <span className="mono" style={{ fontSize: 10.5, color: "var(--faint)" }}>
+            Same body, different hooks
+          </span>
+        </div>
+        <div className="rail-wrap" ref={varRailRef}>
+          <div className="vars">
+            {siblings.map((v) => (
+              <button key={v.id} className="var" data-var={v.id}
+                data-on={v.id === variant.id ? "1" : undefined}
+                title="Click to open · double-click to rename"
+                onClick={(e) => {
+                  if ((e.target as Element).closest("[data-delvar]")) return;
+                  if (v.id !== variant.id) router.push(`/variants/${v.id}`);
+                }}
+                onDoubleClick={(e) => {
+                  e.preventDefault();
+                  openNamer("rename", e.currentTarget, v.id);
+                }}>
+                <span className="mk">{v.label}</span>
+                <span className="nm">{v.name}</span>
+                <span className="ct">{v.nScenes}</span>
+                {siblings.length > 1 && v.status !== "sent" && (
+                  <span className="x" data-delvar
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      const res = await call(`/api/variants/${v.id}`, "DELETE");
+                      if (res && v.id === variant.id) {
+                        const next = siblings.find((s) => s.id !== v.id);
+                        if (next) router.push(`/variants/${next.id}`);
+                      }
+                    }}>×</span>
+                )}
+              </button>
+            ))}
+            <button className="var-add"
+              onClick={(e) => { e.stopPropagation(); openNamer("add", e.currentTarget); }}>
+              + Add variant
+            </button>
+          </div>
+          {namer && (
+            <div className="namer on" style={{ left: namer.anchor.left, top: namer.anchor.top }}>
+              <div className="lb">{namer.mode === "add" ? "Name this variant" : "Rename variant"}</div>
+              <input type="text" autoFocus value={namerVal}
+                placeholder={namer.mode === "add"
+                  ? `Variant ${String.fromCharCode(65 + siblings.length)}` : "Variant name"}
+                onChange={(e) => setNamerVal(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); void commitNamer(); }
+                  if (e.key === "Escape") setNamer(null);
+                }}
+              />
+              <div className="sugs">
+                {NAME_SUGS.filter((s) => !siblings.some((v) => v.name === s)).slice(0, 4).map((s) => (
+                  <button key={s} className="sug" onClick={() => setNamerVal(s)}>{s}</button>
+                ))}
+              </div>
+              <div className="acts">
+                <button className="btn ghost sm" onClick={() => setNamer(null)}>Cancel</button>
+                <button className="btn sm" onClick={() => void commitNamer()}>
+                  {namer.mode === "add" ? "Add" : "Save"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* scenes */}
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginTop: 16 }}>
+          <div className="eyebrow">Scenes — drag to reorder</div>
+          <button className="btn ghost sm" disabled={busy || !scene || scene.layout === "card"}
+            onClick={() => {
+              if (!scene) return;
+              void call(`/api/scenes/${scene.id}/split`, "POST", { at_s: IN + t });
+            }}>
+            Split at playhead
+          </button>
+        </div>
+        <div className="rail-wrap">
+          <div className="rail-scenes" ref={railRef}>
+            {scenes.map((s, i) => (
+              <div key={s.id}
+                className={`scn${dragFrom === i ? " dragging" : ""}${
+                  dragOver?.i === i ? (dragOver.left ? " over-l" : " over-r") : ""}`}
+                draggable
+                data-on={i === sel ? "1" : "0"}
+                onClick={(e) => {
+                  if ((e.target as Element).closest(".op")) return;
+                  setSel(i);
+                }}
+                onDragStart={(e) => {
+                  setDragFrom(i);
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData("text/plain", String(i));
+                }}
+                onDragEnd={() => { setDragFrom(null); setDragOver(null); }}
+                onDragOver={(e) => {
+                  if (dragFrom === null || dragFrom === i) return;
+                  e.preventDefault();
+                  const r = e.currentTarget.getBoundingClientRect();
+                  setDragOver({ i, left: e.clientX < r.left + r.width / 2 });
+                }}
+                onDragLeave={() => setDragOver((d) => (d?.i === i ? null : d))}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (dragFrom === null || dragFrom === i) return;
+                  const r = e.currentTarget.getBoundingClientRect();
+                  let to = e.clientX < r.left + r.width / 2 ? i : i + 1;
+                  if (dragFrom < to) to--;
+                  setDragOver(null);
+                  void call(`/api/scenes/${scenes[dragFrom].id}/move`, "POST", { to })
+                    .then(() => setSel(to));
+                }}>
+                <span className="pv">
+                  {s.layout === "card" ? (
+                    <span className={`pv-card${s.asset && workerUp ? " has-img" : ""}`}
+                      style={assetBg(s.asset)} />
+                  ) : s.layout === "full" ? (
+                    <span className="pv-half pv-vid" style={{ top: 0, bottom: 0 }} />
+                  ) : (
+                    <>
+                      <span className="pv-half pv-vid" style={{ top: 0, height: `${s.splitRatio * 100}%` }} />
+                      <span
+                        className={`pv-half ${s.layout === "split_product" ? "pv-ast" : "pv-vid"}${
+                          s.layout === "split_product" && s.asset && workerUp ? " has-img" : ""}`}
+                        style={{ top: `${s.splitRatio * 100}%`, bottom: 0,
+                          ...(s.layout === "split_product" ? assetBg(s.asset) : {}) }}
+                      />
+                    </>
+                  )}
+                  <span className="hnd-grip">⋮⋮</span>
+                </span>
+                <span className="ops">
+                  {i > 0 && (
+                    <button className="op" title="Move left"
+                      onClick={() => void call(`/api/scenes/${s.id}/move`, "POST", { dir: "up" }).then(() => setSel(i - 1))}>
+                      ‹
+                    </button>
+                  )}
+                  {i < scenes.length - 1 && (
+                    <button className="op" title="Move right"
+                      onClick={() => void call(`/api/scenes/${s.id}/move`, "POST", { dir: "down" }).then(() => setSel(i + 1))}>
+                      ›
+                    </button>
+                  )}
+                  {scenes.length > 1 && (
+                    <button className="op" title="Delete scene"
+                      onClick={() => void call(`/api/scenes/${s.id}`, "DELETE").then(() => setSel(Math.max(0, sel - 1)))}>
+                      ×
+                    </button>
+                  )}
+                </span>
+                <span className="lb">
+                  {LY_NAME[s.layout]}<b>{sceneDur(s).toFixed(1)}s</b>
+                </span>
+              </div>
+            ))}
+            <button className="scn-add" ref={addBtnRef} title="Add scene or apply template"
+              onClick={(e) => {
+                e.stopPropagation();
+                const r = e.currentTarget.getBoundingClientRect();
+                const w = railRef.current!.getBoundingClientRect();
+                setMenuPos({
+                  left: Math.max(0, Math.min(r.left - w.left, w.width - 190)),
+                  top: r.bottom - w.top + 6,
+                });
+                setMenuOpen((o) => !o);
+              }}>
+              +
+            </button>
+          </div>
+          <div className={`addmenu${menuOpen ? " on" : ""}`} style={menuPos}>
+            <div className="grp">Add scene</div>
+            <button onClick={() => { setMenuOpen(false); void call(`/api/variants/${variant.id}/scenes`, "POST", { layout: "full" }); }}>
+              <span className="mi"><i /></span>Full frame
+            </button>
+            <button onClick={() => {
+              setMenuOpen(false);
+              void call(`/api/variants/${variant.id}/scenes`, "POST", {
+                layout: "split_product",
+                slot_a_asset: assets.find((a) => a.kind !== "end_card")?.id ?? null,
+              });
+            }}>
+              <span className="mi"><i /><i className="ast" /></span>Product split
+            </button>
+            <button onClick={() => { setMenuOpen(false); void call(`/api/variants/${variant.id}/scenes`, "POST", { layout: "split_speakers" }); }}>
+              <span className="mi"><i /><i /></span>Speakers split
+            </button>
+            <button onClick={() => {
+              setMenuOpen(false);
+              void call(`/api/variants/${variant.id}/scenes`, "POST", {
+                layout: "card",
+                slot_a_asset: assets.find((a) => a.kind === "end_card")?.id ?? null,
+              });
+            }}>
+              <span className="mi"><i className="crd" /></span>End card
+            </button>
+            <div className="sep" />
+            <div className="grp">Apply template</div>
+            <button onClick={() => { setMenuOpen(false); void call(`/api/variants/${variant.id}/template`, "POST", { key: "plain" }).then(() => setSel(0)); }}>
+              Plain<span className="sub">1 scene</span>
+            </button>
+            <button onClick={() => { setMenuOpen(false); void call(`/api/variants/${variant.id}/template`, "POST", { key: "product" }).then(() => setSel(0)); }}>
+              Product split<span className="sub">2 scenes</span>
+            </button>
+            <button onClick={() => { setMenuOpen(false); void call(`/api/variants/${variant.id}/template`, "POST", { key: "hookfirst" }).then(() => setSel(0)); }}>
+              Hook first + card<span className="sub">3 scenes</span>
+            </button>
+          </div>
+        </div>
+
+        {/* transport */}
+        <div className="transport">
+          <button className="tbtn pri" aria-label={playing ? "Pause" : "Play"} title="Play (space)"
+            onClick={() => (playing ? pause() : play())}>
+            <svg viewBox="0 0 12 12">
+              {playing
+                ? <><rect x="2" y="1.5" width="3" height="9" /><rect x="7" y="1.5" width="3" height="9" /></>
+                : <path d="M2 1l9 5-9 5z" />}
+            </svg>
+          </button>
+          <button className="tbtn" aria-label="Stop" title="Stop"
+            onClick={() => { pause(); seek(0); }}>
+            <svg viewBox="0 0 12 12"><rect x="2" y="2" width="8" height="8" /></svg>
+          </button>
+          <span className="tc mono">
+            <b>{clock(Math.min(t, clipDur))}</b> / <span>{clipDur.toFixed(1)}</span>
+          </span>
+          <input type="range" min={0} max={1000} step={1} aria-label="Scrub"
+            value={clipDur > 0 ? Math.round((Math.min(t, clipDur) / clipDur) * 1000) : 0}
+            onChange={(e) => seek((+e.target.value / 1000) * clipDur)}
+          />
+          <div className="speeds">
+            {[0.25, 0.5, 1, 1.5, 2].map((r) => (
+              <button key={r} className="spd" data-on={rate === r ? "1" : undefined}
+                onClick={() => setRate(r)}>
+                {r}×
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="trim">
+          <div className="fld">In <input type="text" className="mono" readOnly value={fmt(IN)} /></div>
+          <div className="fld">Out <input type="text" className="mono" readOnly value={fmt(OUT)} /></div>
+          <div className="fld mono" style={{ color: "var(--ink)" }}>{clipDur.toFixed(1)}s</div>
+          <div className="fld" style={{ marginLeft: "auto" }}>
+            {box.axis === "y"
+              ? cropPos.y < 0.04 ? "Framed high" : cropPos.y > 0.12 ? "Framed low" : "Centred"
+              : `Window at ${Math.round(cropPos.x * 100)}%`}
+          </div>
+        </div>
+        <div className="note" style={{ marginTop: 10 }}>
+          Landscape source, vertical output. Drag the frame to reframe and the
+          yellow handles to trim — both save with the clip, so re-exports keep them.
+        </div>
+        {note && <p className="hint">{note}</p>}
+      </div>
+
+      {/* ---------- sidebar ---------- */}
+      <div className="card pad">
+        <Acc title="Template" sum={shape === "custom" ? "Custom" : { plain: "Plain", product: "Product split", hookfirst: "Hook first + card" }[shape]} defaultOpen>
+          <div className="presets" style={{ marginBottom: 2 }}>
+            {([["plain", "Plain"], ["product", "Product split"], ["hookfirst", "Hook first + card"]] as const).map(([k, lbl]) => (
+              <button key={k} className="chip" data-on={shape === k ? "1" : undefined}
+                disabled={busy}
+                onClick={() => void call(`/api/variants/${variant.id}/template`, "POST", { key: k }).then(() => setSel(0))}>
+                {lbl}
+              </button>
+            ))}
+            {shape === "custom" && <span className="chip" data-on="1" style={{ cursor: "default" }}>Custom</span>}
+          </div>
+        </Acc>
+
+        <Acc title="Assets" sum={`${assets.length} in library`} defaultOpen>
+          {assets.length ? (
+            <div className="imp">
+              {assets.map((a) => (
+                <button key={a.id} className="it" title={a.name}
+                  onClick={() => {
+                    if (!scene) return;
+                    const patch: Record<string, unknown> = { slot_a_asset: a.id };
+                    if (scene.layout === "full") {
+                      patch.layout = a.kind === "end_card" ? "card" : "split_product";
+                      if (patch.layout === "card") patch.duration_s = 2.5;
+                      if (patch.layout === "split_product") patch.split_ratio = 0.6;
+                    }
+                    void call(`/api/scenes/${scene.id}`, "PATCH", patch);
+                  }}>
+                  <span className="sq" style={assetBg(a.id)} />
+                  <span className="nm">{a.name.split(" — ")[0]}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p style={{ fontSize: 11, color: "var(--muted)" }}>
+              No brand assets yet. Upload stills to R2 via the Cloudflare
+              dashboard and add rows to <span className="mono">assets</span> —
+              they appear here and in splits.
+            </p>
+          )}
+          {assets.length > 0 && (
+            <p style={{ fontSize: 10.5, color: "var(--muted)", margin: "4px 0 0" }}>
+              Click to drop into the selected scene.
+            </p>
+          )}
+        </Acc>
+
+        <Acc title="Scene layout"
+          sum={scene ? [LY_NAME[scene.layout],
+            scene.layout.startsWith("split")
+              ? `${Math.round(scene.splitRatio * 100)}/${Math.round((1 - scene.splitRatio) * 100)}`
+              : null].filter(Boolean).join(" · ") : ""}
+          defaultOpen>
+          <div className="layouts">
+            {(["full", "split_product", "split_speakers", "card"] as const).map((l) => {
+              const cardToSource = scene?.layout === "card" && l !== "card" && scene?.in === null;
+              return (
+                <button key={l} className="ly" data-on={scene?.layout === l ? "1" : undefined}
+                  disabled={busy || !scene || cardToSource}
+                  title={cardToSource ? "This card has no source footage" : undefined}
+                  onClick={() => {
+                    if (!scene) return;
+                    const patch: Record<string, unknown> = { layout: l };
+                    if (l === "card" && !scene.dur) patch.duration_s = 2.5;
+                    void call(`/api/scenes/${scene.id}`, "PATCH", patch);
+                  }}>
+                  <span className="gl">
+                    {l === "full" && <i />}
+                    {l === "split_product" && <><i /><i className="ast" /></>}
+                    {l === "split_speakers" && <><i /><i /></>}
+                    {l === "card" && <i className="crd" />}
+                  </span>
+                  {l === "full" ? "full" : l === "split_product" ? "product"
+                    : l === "split_speakers" ? "speakers" : "card"}
+                </button>
+              );
+            })}
+          </div>
+
+          {scene && (scene.layout === "split_product" || scene.layout === "card") && (
+            <div className="ctrl">
+              <label htmlFor="slot">{scene.layout === "card" ? "Card asset" : "Lower slot"}</label>
+              <select id="slot" value={scene.asset ?? ""} disabled={busy}
+                onChange={(e) => void call(`/api/scenes/${scene.id}`, "PATCH", { slot_a_asset: e.target.value || null })}>
+                <option value="">— none —</option>
+                {assets.filter((a) => a.kind !== "logo").map((a) => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {scene && scene.layout.startsWith("split") && (
+            <div className="ctrl">
+              <label>Split ratio</label>
+              <div className="presets" style={{ margin: 0 }}>
+                {[0.5, 0.6].map((r) => (
+                  <button key={r} className="chip" data-on={scene.splitRatio === r ? "1" : undefined}
+                    disabled={busy}
+                    onClick={() => void call(`/api/scenes/${scene.id}`, "PATCH", { split_ratio: r })}>
+                    {Math.round(r * 100)} / {Math.round((1 - r) * 100)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {scene && scenes.length > 1 && scene.layout !== "card" && (
+            <label className="toggle">
+              <input type="checkbox" checked={scene.lifted} disabled={busy}
+                onChange={(e) => void call(`/api/scenes/${scene.id}`, "PATCH", { lifted: e.target.checked })} />
+              Lift from original position
+            </label>
+          )}
+
+          {scene && scene.layout !== "card" && (
+            <div className="ctrl" style={{ marginTop: 8 }}>
+              <label>Audio</label>
+              <div className="presets" style={{ margin: 0 }}>
+                {(["source", "mute"] as const).map((a) => (
+                  <button key={a} className="chip" data-on={scene.audio === a ? "1" : undefined}
+                    disabled={busy}
+                    onClick={() => void call(`/api/scenes/${scene.id}`, "PATCH", { audio: a })}>
+                    {a}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </Acc>
+
+        <Acc title="Subtitles" sum={`${activePresetName} · ${S.fs}px`}>
+          <div className="presets">
+            {presets.map((p) => (
+              <button key={p.id} className="chip"
+                data-on={presetId === p.id && !Object.keys(styleOv).length ? "1" : undefined}
+                onClick={() => applyPreset(p)}>
+                {p.name}
+              </button>
+            ))}
+          </div>
+          <div className="ctrl">
+            <label htmlFor="fs">Size <b>{S.fs}px</b></label>
+            <input id="fs" type="range" min={16} max={46} value={S.fs}
+              onChange={(e) => setStyle({ fs: +e.target.value })} />
+          </div>
+          <div className="ctrl">
+            <label htmlFor="ol">Outline <b>{S.ol}px</b></label>
+            <input id="ol" type="range" min={0} max={8} value={S.ol}
+              onChange={(e) => setStyle({ ol: +e.target.value })} />
+          </div>
+          <div className="ctrl">
+            <label htmlFor="vp">Vertical position <b>{S.vp}%</b></label>
+            <input id="vp" type="range" min={35} max={88} value={S.vp}
+              onChange={(e) => setStyle({ vp: +e.target.value })} />
+          </div>
+          <div className="ctrl">
+            <label htmlFor="wpl">Words per line <b>{S.wpl}</b></label>
+            <input id="wpl" type="range" min={2} max={8} value={S.wpl}
+              onChange={(e) => setStyle({ wpl: +e.target.value })} />
+          </div>
+          <div className="ctrl">
+            <label>Active word</label>
+            <div className="swatches">
+              {["#FFC629", "#4ED6A1", "#FF6B8A", "#FFFFFF"].map((c) => (
+                <button key={c} className="sw" style={{ background: c }}
+                  data-on={S.hl === c ? "1" : undefined}
+                  aria-label={`Highlight ${c}`}
+                  onClick={() => setStyle({ hl: c })} />
+              ))}
+            </div>
+          </div>
+          <label className="toggle">
+            <input type="checkbox" checked={S.caps} onChange={(e) => setStyle({ caps: e.target.checked })} />
+            All caps
+          </label>
+          <label className="toggle">
+            <input type="checkbox" checked={S.box} onChange={(e) => setStyle({ box: e.target.checked })} />
+            Background box
+          </label>
+        </Acc>
+
+        <Acc title="Transcript fix">
+          <FixEditor fixes={fixes} onAdd={addFix} onDrop={dropFix} />
+          <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 5 }}>
+            Corrections apply to this clip only. The source transcript is untouched.
+          </p>
+        </Acc>
+
+        <Acc title="Export">
+          <div className="presets" style={{ margin: 0 }}>
+            {Object.keys(RATIOS).map((r) => (
+              <button key={r} className="chip" disabled={busy}
+                onClick={() => void call(`/api/variants/${variant.id}/render`, "POST", { ratio: r })
+                  .then((res) => res && setNote(`render queued: ${RATIOS[r].label}`))}>
+                Render {RATIOS[r].label}
+              </button>
+            ))}
+          </div>
+          <p style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6 }}>
+            Renders run on the worker and land in R2. The Preview screen plays
+            the finished export.
+          </p>
+        </Acc>
+
+        <button className="btn" style={{ width: "100%", marginTop: 14 }}
+          onClick={() => router.push(`/variants/${variant.id}/preview`)}>
+          Preview {siblings.length > 1 ? "all variants" : "this variant"}
+        </button>
+        {!draft && (
+          <p style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 8 }}>
+            This variant is {variant.status.replace("_", " ")} — edits here
+            change what ships if it re-renders.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Acc({ title, sum, defaultOpen, children }: {
+  title: string; sum?: string; defaultOpen?: boolean; children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  return (
+    <div className="acc" data-open={open ? "1" : "0"}>
+      <button className="acc-h" aria-expanded={open} onClick={() => setOpen(!open)}>
+        {title} {sum && <span className="sum">{sum}</span>}<span className="cv" />
+      </button>
+      <div className="acc-b">{children}</div>
+    </div>
+  );
+}
+
+function FixEditor({ fixes, onAdd, onDrop }: {
+  fixes: Record<string, string>;
+  onAdd: (from: string, to: string) => void;
+  onDrop: (from: string) => void;
+}) {
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  return (
+    <div>
+      {Object.entries(fixes).map(([f, t]) => (
+        <div key={f} className="row" style={{ alignItems: "center", gap: 6, marginBottom: 5, fontSize: 11.5 }}>
+          <span className="mono" style={{ color: "var(--muted)" }}>{f}</span>
+          <span style={{ color: "var(--faint)" }}>→</span>
+          <span className="mono" style={{ flex: 1 }}>{t}</span>
+          <button className="chip" onClick={() => onDrop(f)} title="Remove">×</button>
+        </div>
+      ))}
+      <div className="row" style={{ gap: 6 }}>
+        <input type="text" placeholder="heard as" value={from} style={{ flex: 1, minWidth: 0 }}
+          onChange={(e) => setFrom(e.target.value)} />
+        <input type="text" placeholder="should be" value={to} style={{ flex: 1, minWidth: 0 }}
+          onChange={(e) => setTo(e.target.value)} />
+        <button className="btn ghost sm" disabled={!from.trim() || !to.trim()}
+          onClick={() => { onAdd(from.trim(), to.trim()); setFrom(""); setTo(""); }}>
+          Add
+        </button>
+      </div>
+    </div>
+  );
+}
