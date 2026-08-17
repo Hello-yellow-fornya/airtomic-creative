@@ -14,7 +14,7 @@ import threading
 import time
 import traceback
 
-from . import config, db, ingest, pipeline, r2, scene_detect, tag, webapp
+from . import config, db, ingest, pipeline, r2, render, scene_detect, tag, webapp
 
 log = logging.getLogger("worker")
 
@@ -22,9 +22,14 @@ HANDLERS = {
     "ingest": ingest.handle,
     "scene_detect": scene_detect.handle,
     "tag": tag.handle,
+    "render": render.handle,
 }
-# Every pipeline stage shares one failure hook: mark the video failed.
-FAILURE_HOOKS = {job_type: pipeline.on_permanent_failure for job_type in HANDLERS}
+# Every ingest-pipeline stage shares one failure hook: mark the video failed.
+# Render failures stay on the job row (the variant has no failed state).
+FAILURE_HOOKS = {
+    job_type: pipeline.on_permanent_failure
+    for job_type in ("ingest", "scene_detect", "tag")
+}
 
 STUCK_SWEEP_INTERVAL_S = 300
 
