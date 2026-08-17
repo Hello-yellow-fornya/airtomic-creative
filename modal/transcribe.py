@@ -192,12 +192,6 @@ gpu_image = (
 )
 
 
-@app.function(
-    image=gpu_image,
-    gpu=GPU,
-    timeout=60 * 60,
-    secrets=[modal.Secret.from_name("huggingface")],
-)
 def _diarise(result, audio, device: str, min_speakers, max_speakers):
     """Run pyannote diarisation and assign word speakers. Raises with a
     clear message on any failure — the caller decides whether to degrade."""
@@ -238,6 +232,12 @@ def _diarise(result, audio, device: str, min_speakers, max_speakers):
     return whisperx.assign_word_speakers(diarize_df, result)
 
 
+@app.function(
+    image=gpu_image,
+    gpu=GPU,
+    timeout=60 * 60,
+    secrets=[modal.Secret.from_name("huggingface")],
+)
 def transcribe(
     audio_url: str,
     min_speakers: int | None = None,
