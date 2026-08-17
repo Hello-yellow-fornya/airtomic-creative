@@ -10,7 +10,8 @@ __pycache__/
 .venv/
 venv/
 
-media/
+# local media scratch at repo root only — never app routes like app/api/media
+/media/
 tmp/
 *.mp4
 *.mov
