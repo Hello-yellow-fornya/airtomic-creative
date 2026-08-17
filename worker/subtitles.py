@@ -42,7 +42,7 @@ def output_words(
 
 
 DEFAULT_PRESET = {
-    "font": "DejaVu Sans", "fs": 30, "ol": 3, "vp": 72,
+    "font": "Inter", "fs": 30, "ol": 3, "vp": 72,
     "wpl": 4, "hl": "#FFC629", "caps": False, "box": False,
 }
 

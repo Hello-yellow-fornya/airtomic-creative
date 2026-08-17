@@ -4,7 +4,7 @@ import Transcript from "./Transcript";
 
 export const dynamic = "force-dynamic";
 
-type SceneRow = { idx: number; start_s: string; end_s: string };
+type SceneRow = { id: string; idx: number; start_s: string; end_s: string; has_kf: boolean };
 
 export default async function VideoPage({
   params,
@@ -21,9 +21,12 @@ export default async function VideoPage({
   if (!video) notFound();
 
   const scenes = await q<SceneRow>(
-    "SELECT idx, start_s::text, end_s::text FROM scenes WHERE video_id = $1 ORDER BY idx",
+    `SELECT id::text, idx, start_s::text, end_s::text,
+            (keyframe_uri IS NOT NULL) AS has_kf
+     FROM scenes WHERE video_id = $1 ORDER BY idx`,
     [id],
   );
+  const kfEnabled = !!(process.env.WORKER_URL && process.env.INGEST_TOKEN);
 
   const segments = await q<{
     id: string; idx: number; speaker: string | null; start_s: string;
@@ -59,7 +62,18 @@ export default async function VideoPage({
             <div
               key={s.idx}
               className="scene"
-              style={{ flex: Math.max(d / duration, 0.004) }}
+              style={{
+                flex: Math.max(d / duration, 0.004),
+                ...(kfEnabled && s.has_kf
+                  ? {
+                      backgroundImage: `url(/api/keyframes/${s.id})`,
+                      backgroundSize: "cover",
+                      backgroundPosition: "center",
+                      color: "#fff",
+                      textShadow: "0 0 3px #000",
+                    }
+                  : {}),
+              }}
               title={`scene ${s.idx} · ${s.start_s}s – ${s.end_s}s`}
             >
               s{s.idx}

@@ -60,6 +60,14 @@ On Railway:
 
 ### Web app
 
+On Vercel: **Add New Project** → import this repo → set **Root Directory**
+to `web` → add env var `DATABASE_URL` (the Neon string) → Deploy. That is
+the only required variable. Optional: `WORKER_URL` + `INGEST_TOKEN` enable
+keyframe thumbnails via the server-side presign proxy (`/api/keyframes/...`
+— the token never reaches the browser; raw footage stays off public URLs).
+
+Locally:
+
 ```bash
 cd web && npm install
 DATABASE_URL=... npm run dev     # or npm run build && npm start
@@ -83,13 +91,32 @@ curl -X POST https://<worker-domain>/ingest \
   -d "key=<INGEST_TOKEN>" -d "url=https://example.com/ep12.mp4" -d "title=Ep 12"
 ```
 
-**From a local file:**
+**From a local file (browser):** the same worker page has an upload form —
+the browser PUTs straight to R2 via presigned URLs (multipart above
+64 MiB), then the worker completes the upload and queues ingest. One-time
+setup: the R2 bucket needs a CORS rule (Cloudflare dashboard → R2 → bucket
+→ Settings → CORS policy):
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://<worker-domain>"],
+    "AllowedMethods": ["PUT"],
+    "AllowedHeaders": ["content-type"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+Without `ExposeHeaders: ETag` multipart uploads fail — the browser can't
+read part ETags.
+
+**From a local file (CLI):**
 
 ```bash
 python scripts/upload_video.py path/to/podcast.mp4 --title "Ep 12"
 ```
-
-Uploads to R2 via presigned URLs (multipart above 64 MiB).
 
 Either way the `videos` row is inserted and an `ingest` job queued. The
 worker picks it up: fetches/archives the source into R2, probes metadata,
