@@ -11,7 +11,13 @@ import { useRouter } from "next/navigation";
 type UpItem = { name: string; stage: string; pct: number | null; error?: string };
 type ProcItem = {
   id: string; title: string | null; status: string; status_detail: string | null;
+  n_words: string | null;
 };
+
+/** Pipeline stages in order — real video statuses set by the worker.
+ * The bar fills a stage's worth per step; 'ready' fills it completely. */
+const STAGES = ["queued", "transcribing", "detecting", "tagging", "ready"];
+const READY_LINGER_MS = 10_000;
 
 export default function UploadArea({ workerUp }: { workerUp: boolean }) {
   const router = useRouter();
@@ -24,15 +30,38 @@ export default function UploadArea({ workerUp }: { workerUp: boolean }) {
   const sourceRef = useRef<"longform" | "ad_creative">("longform");
   const [dragOver, setDragOver] = useState<string | null>(null);
 
+  // Videos this session has watched processing. When one turns ready it
+  // stays on screen for a moment — landing visibly with its word count and
+  // a link to the transcript — instead of vanishing into the grid.
+  const watched = useRef<Set<string>>(new Set());
+  const readyUntil = useRef<Map<string, number>>(new Map());
+  const [, forceTick] = useState(0);
+
   const poll = useCallback(async () => {
     try {
       const res = await fetch("/api/videos/status");
-      if (res.ok) setProcessing((await res.json()).items);
+      if (!res.ok) return;
+      const items: ProcItem[] = (await res.json()).items;
+      const now = Date.now();
+      for (const v of items) {
+        if (v.status !== "ready" && v.status !== "failed") watched.current.add(v.id);
+        if (v.status === "ready" && watched.current.has(v.id) && !readyUntil.current.has(v.id)) {
+          readyUntil.current.set(v.id, now + READY_LINGER_MS);
+          router.refresh(); // the grid below picks the video up
+        }
+      }
+      for (const [id, until] of readyUntil.current) {
+        if (until < now) {
+          readyUntil.current.delete(id);
+          watched.current.delete(id);
+        }
+      }
+      setProcessing(items);
     } catch { /* transient */ }
-  }, []);
+  }, [router]);
   useEffect(() => {
     void poll();
-    const iv = setInterval(() => void poll(), 4000);
+    const iv = setInterval(() => { void poll(); forceTick((t) => t + 1); }, 3000);
     return () => clearInterval(iv);
   }, [poll]);
 
@@ -85,6 +114,8 @@ export default function UploadArea({ workerUp }: { workerUp: boolean }) {
         }),
       });
       if (!done.ok) throw new Error((await done.json()).error ?? done.statusText);
+      const doneBody = await done.json().catch(() => ({}));
+      if (doneBody.video_id) watched.current.add(doneBody.video_id);
       setUploads((u) => u.filter((x) => x.name !== f.name));
       void poll();
       router.refresh();
@@ -111,6 +142,7 @@ export default function UploadArea({ workerUp }: { workerUp: boolean }) {
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? res.statusText);
+      if (body.video_id) watched.current.add(body.video_id);
       setUrl("");
       setMsg("Queued — fetching the source now.");
       void poll();
@@ -180,36 +212,71 @@ export default function UploadArea({ workerUp }: { workerUp: boolean }) {
 
       <h2 className="sec">Processing</h2>
       <div className="card" style={{ marginBottom: 26 }}>
-        {uploads.length === 0 && processing.length === 0 && (
-          <div className="ingest">
-            <span className="nm" style={{ color: "var(--muted)", fontWeight: 400 }}>
-              Nothing processing. Drop a file or paste a URL to start.
-            </span>
-          </div>
-        )}
-        {uploads.map((u) => (
-          <div className="ingest" key={`up-${u.name}`}>
-            <span className="nm">{u.name}</span>
-            <span className="stage-lbl">{u.stage}</span>
-            <span className="prog">
-              <i style={{ width: u.pct !== null ? `${u.pct}%` : "30%" }} />
-            </span>
-            {u.error && <span style={{ fontSize: 10.5, color: "#9A2F53" }}>{u.error}</span>}
-          </div>
-        ))}
-        {processing.map((v) => (
-          <div className="ingest" key={v.id}>
-            <span className="nm">{v.title ?? "untitled"}</span>
-            <span className="stage-lbl">
-              {v.status === "failed" ? "failed" : v.status_detail || v.status}
-            </span>
-            {v.status !== "failed" ? (
-              <span className="prog"><i style={{ width: "40%" }} /></span>
-            ) : (
-              <span className="tag flag" title={v.status_detail ?? undefined}>failed</span>
-            )}
-          </div>
-        ))}
+        {(() => {
+          // ready rows linger only if this session watched them process
+          const visible = processing.filter(
+            (v) => v.status !== "ready" || readyUntil.current.has(v.id),
+          );
+          if (uploads.length === 0 && visible.length === 0) {
+            return (
+              <div className="ingest">
+                <span className="nm" style={{ color: "var(--muted)", fontWeight: 400 }}>
+                  Nothing processing. Drop a file or paste a URL to start.
+                </span>
+              </div>
+            );
+          }
+          return (
+            <>
+              {uploads.map((u) => (
+                <div className="ingest" key={`up-${u.name}`}>
+                  <span className="nm">{u.name}</span>
+                  <span className="stage-lbl">{u.error ? "failed" : `uploading · ${u.stage}`}</span>
+                  {u.error ? (
+                    <span style={{ fontSize: 10.5, color: "#9A2F53" }}>{u.error}</span>
+                  ) : (
+                    <span className="prog">
+                      <i style={{ width: u.pct !== null ? `${u.pct * 0.2}%` : "8%" }} />
+                    </span>
+                  )}
+                </div>
+              ))}
+              {visible.map((v) => {
+                const stageIdx = Math.max(0, STAGES.indexOf(v.status));
+                const ready = v.status === "ready";
+                const failed = v.status === "failed";
+                const row = (
+                  <div className="ingest" key={v.id}
+                    style={ready ? { background: "#F4F9F8", cursor: "pointer" } : undefined}>
+                    <span className="nm">
+                      {v.title ?? "untitled"}
+                      {ready && (
+                        <span style={{ color: "var(--teal)", fontWeight: 600, marginLeft: 8, fontSize: 11.5 }}>
+                          ready · {v.n_words ?? 0} words — open transcript →
+                        </span>
+                      )}
+                    </span>
+                    <span className="stage-lbl" style={ready ? { color: "var(--teal)" } : undefined}>
+                      {failed ? "failed" : ready ? "ready" : v.status}
+                    </span>
+                    {failed ? (
+                      <span className="tag flag" title={v.status_detail ?? undefined}>failed</span>
+                    ) : (
+                      <span className="prog" title={v.status_detail ?? undefined}>
+                        <i style={{
+                          width: ready ? "100%" : `${((stageIdx + 0.5) / STAGES.length) * 100}%`,
+                        }} />
+                      </span>
+                    )}
+                  </div>
+                );
+                return ready ? (
+                  <a key={v.id} href={`/videos/${v.id}`} style={{ display: "block" }}>{row}</a>
+                ) : row;
+              })}
+            </>
+          );
+        })()}
       </div>
     </>
   );
