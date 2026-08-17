@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { q } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -59,7 +60,7 @@ export default async function ClipsPage() {
                 <td className="meta">
                   {parseFloat(r.source_in_s).toFixed(1)}s – {parseFloat(r.source_out_s).toFixed(1)}s
                 </td>
-                <td>{r.label} · {r.variant_name}</td>
+                <td><Link href={`/variants/${r.variant_id}`} style={{ textDecoration: "underline" }}>{r.label} · {r.variant_name}</Link></td>
                 <td><span className="badge">{r.status}</span></td>
                 <td>
                   {r.render_status ? (

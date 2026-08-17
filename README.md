@@ -11,7 +11,7 @@ See [docs/prototype.html](./docs/prototype.html) for the UI reference.
 
 ```
 migrations/    plain SQL, numbered, forward-only
-web/           Next.js 15 app (Vercel) — not built yet
+web/           Next.js 15 app (Vercel)
 worker/        Python worker — ingest today; scene detect, tag, render, push later
 modal/         Modal GPU function for WhisperX
 scripts/       CLI utilities (upload_video.py)
@@ -57,6 +57,19 @@ On Railway:
    Railway injects `PORT` itself.
 4. Settings → Networking → **Generate Domain** so the web trigger is
    reachable. Logs should show `worker up` and `web trigger listening`.
+
+### Web app
+
+```bash
+cd web && npm install
+DATABASE_URL=... npm run dev     # or npm run build && npm start
+```
+
+Videos list -> transcript with word-level timing and scene timeline ->
+select a passage (click first word, click last word) -> clip + variant +
+9x16 render job in one action. The clips page tracks render status and
+export URIs; the variant editor handles layouts, split presets, asset
+slots, per-scene-per-ratio reframing, reordering, and re-renders.
 
 ### Ingest a video
 

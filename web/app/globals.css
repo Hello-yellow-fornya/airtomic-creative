@@ -85,3 +85,10 @@ table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th { text-align: left; color: var(--muted); font-size: 11px; text-transform: uppercase;
      letter-spacing: 0.05em; padding: 6px 10px; border-bottom: 1px solid var(--line); }
 td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.chipbtn {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+  padding: 5px 10px; font-size: 12px; cursor: pointer; margin-right: 4px;
+}
+.chipbtn:hover:not(:disabled) { border-color: var(--ink); }
+.chipbtn:disabled { opacity: 0.45; cursor: default; }
+select { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; }
