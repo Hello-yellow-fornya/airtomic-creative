@@ -336,6 +336,21 @@ api_image = modal.Image.debian_slim(python_version="3.11").pip_install(
 )
 
 
+_transcribe_handle = None
+
+
+def _transcribe_fn():
+    """Resolve the deployed GPU function by name. Inside the api container
+    the module-level `transcribe` reference can be a plain function rather
+    than a hydrated Modal handle (version-dependent), which makes
+    `.spawn` blow up with AttributeError — from_name is the documented,
+    version-robust way to call a deployed function."""
+    global _transcribe_handle
+    if _transcribe_handle is None:
+        _transcribe_handle = modal.Function.from_name(app.name, "transcribe")
+    return _transcribe_handle
+
+
 @app.function(
     image=api_image,
     secrets=[modal.Secret.from_name("airtomic-transcribe-auth")],
@@ -359,7 +374,7 @@ def api():
         audio_url = body.get("audio_url")
         if not audio_url:
             raise HTTPException(status_code=400, detail="audio_url is required")
-        call = transcribe.spawn(
+        call = _transcribe_fn().spawn(
             audio_url,
             min_speakers=body.get("min_speakers"),
             max_speakers=body.get("max_speakers"),
