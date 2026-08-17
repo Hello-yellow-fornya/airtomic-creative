@@ -10,6 +10,7 @@ Modal), so threads are enough.
 import logging
 import signal
 import socket
+import sys
 import threading
 import time
 import traceback
@@ -96,10 +97,18 @@ def _loop(slot: int, cfg) -> None:
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+    # INFO to stdout, WARNING+ to stderr. Railway (and most log collectors)
+    # tag anything on stderr as error severity — with the default stderr
+    # handler a perfectly healthy worker log reads as a wall of failures.
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    out = logging.StreamHandler(sys.stdout)
+    out.setLevel(logging.DEBUG)
+    out.addFilter(lambda r: r.levelno < logging.WARNING)
+    out.setFormatter(fmt)
+    err = logging.StreamHandler(sys.stderr)
+    err.setLevel(logging.WARNING)
+    err.setFormatter(fmt)
+    logging.basicConfig(level=logging.INFO, handlers=[out, err])
     cfg = config.load()
 
     for sig in (signal.SIGINT, signal.SIGTERM):

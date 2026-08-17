@@ -370,8 +370,13 @@ def make_server(cfg: Config) -> ThreadingHTTPServer:
                 self._json(400, {"error": "size required"})
                 return
 
+            # target=asset presigns into assets/{id}/ instead — same PUT
+            # flow, completion writes an assets row rather than a video.
             video_id = str(uuid.uuid4())
-            r2_key = f"sources/{video_id}/{safe_name}"
+            if body.get("target") == "asset":
+                r2_key = f"assets/{video_id}/{safe_name}"
+            else:
+                r2_key = f"sources/{video_id}/{safe_name}"
             try:
                 if size <= r2.PART_SIZE:
                     resp = {
@@ -402,6 +407,9 @@ def make_server(cfg: Config) -> ThreadingHTTPServer:
             body = self._read_json()
             if not authed(str(body.get("key", ""))):
                 self._json(401, {"error": "unauthorised"})
+                return
+            if body.get("target") == "asset":
+                self._asset_complete(body)
                 return
             video_id = str(body.get("video_id", ""))
             r2_key = str(body.get("r2_key", ""))
@@ -439,5 +447,55 @@ def make_server(cfg: Config) -> ThreadingHTTPServer:
                 return
             log.info("upload complete: video %s queued as job %s", vid, job_id)
             self._json(200, {"video_id": vid, "job_id": job_id})
+
+        def _asset_complete(self, body: dict) -> None:
+            """Finish an asset upload: complete multipart if needed, insert
+            the assets row. asset_id doubles as the upload's video_id slot."""
+            asset_id = str(body.get("video_id", ""))
+            r2_key = str(body.get("r2_key", ""))
+            kind = str(body.get("kind", "product_still"))
+            if kind not in ("product_still", "end_card", "logo", "broll", "other"):
+                self._json(400, {"error": "bad asset kind"})
+                return
+            if not asset_id or not r2_key.startswith(f"assets/{asset_id}/"):
+                self._json(400, {"error": "bad asset_id/r2_key"})
+                return
+            name = str(body.get("name") or r2_key.rsplit("/", 1)[-1])[:120]
+
+            def _num(v, cast):
+                try:
+                    return cast(v) if v is not None else None
+                except (TypeError, ValueError):
+                    return None
+
+            try:
+                if body.get("mode") == "multipart":
+                    parts = body.get("parts") or []
+                    if not parts:
+                        self._json(400, {"error": "multipart complete needs parts"})
+                        return
+                    r2.complete_multipart(
+                        s3, cfg.r2_bucket, r2_key, str(body.get("upload_id")),
+                        [{"PartNumber": int(p["PartNumber"]), "ETag": str(p["ETag"])}
+                         for p in parts],
+                    )
+                with db.connect(cfg.database_url) as conn:
+                    db.create_asset(
+                        conn,
+                        asset_id=asset_id,
+                        kind=kind,
+                        name=name,
+                        storage_uri=r2.make_uri(cfg.r2_bucket, r2_key),
+                        width=_num(body.get("width"), int),
+                        height=_num(body.get("height"), int),
+                        duration_s=_num(body.get("duration_s"), float),
+                        uploaded_by="web-upload",
+                    )
+            except Exception as exc:
+                log.exception("asset upload complete failed")
+                self._json(500, {"error": str(exc)[:300]})
+                return
+            log.info("asset upload complete: %s (%s)", asset_id, kind)
+            self._json(200, {"asset_id": asset_id})
 
     return ThreadingHTTPServer(("", cfg.port), Handler)

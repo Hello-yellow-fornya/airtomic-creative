@@ -68,6 +68,21 @@ export default function UploadArea({ workerUp }: { workerUp: boolean }) {
   const setItem = (name: string, patch: Partial<UpItem>) =>
     setUploads((u) => u.map((x) => (x.name === name ? { ...x, ...patch } : x)));
 
+  async function dismissFailed(v: ProcItem) {
+    if (!window.confirm(
+      `Dismiss "${v.title ?? "untitled"}"?\n\nThis removes the failed ingest and its uploaded files. ` +
+      "Re-ingest the source to try again.",
+    )) return;
+    const res = await fetch(`/api/videos/${v.id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setMsg(body.error ?? res.statusText);
+      return;
+    }
+    void poll();
+    router.refresh();
+  }
+
   async function uploadFile(f: File, source: "longform" | "ad_creative") {
     setUploads((u) => [{ name: f.name, stage: "starting", pct: null }, ...u]);
     try {
@@ -260,7 +275,11 @@ export default function UploadArea({ workerUp }: { workerUp: boolean }) {
                       {failed ? "failed" : ready ? "ready" : v.status}
                     </span>
                     {failed ? (
-                      <span className="tag flag" title={v.status_detail ?? undefined}>failed</span>
+                      <>
+                        <span className="tag flag" title={v.status_detail ?? undefined}>failed</span>
+                        <button className="chip" title="Dismiss — removes this failed ingest and its files"
+                          onClick={() => void dismissFailed(v)}>×</button>
+                      </>
                     ) : (
                       <span className="prog" title={v.status_detail ?? undefined}>
                         <i style={{

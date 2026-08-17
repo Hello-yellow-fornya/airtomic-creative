@@ -125,3 +125,27 @@ def requeue_stuck_jobs(conn: psycopg.Connection) -> int:
         """
     ).fetchall()
     return len(rows)
+
+
+def create_asset(
+    conn: psycopg.Connection,
+    *,
+    asset_id: str,
+    kind: str,
+    name: str,
+    storage_uri: str,
+    width: int | None,
+    height: int | None,
+    duration_s: float | None,
+    uploaded_by: str | None,
+) -> str:
+    row = conn.execute(
+        """
+        INSERT INTO assets (id, kind, name, storage_uri, width, height,
+                            duration_s, uploaded_by)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
+        """,
+        (asset_id, kind, name, storage_uri, width, height, duration_s, uploaded_by),
+    ).fetchone()
+    return str(row["id"])
