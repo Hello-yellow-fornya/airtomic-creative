@@ -232,7 +232,6 @@ export default function Builder({
 
   const srcRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
-  const dragStart = useRef({ px: 0, py: 0, x: 0, y: 0 });
 
   async function saveCrop(pos: { x: number; y: number }) {
     if (!scene) return;
@@ -247,30 +246,49 @@ export default function Builder({
     router.refresh();
   }
 
+  /** Drag state lives in a ref, not React state, so the pointermove path
+   * has no render round-trip to race against. Move/up listeners attach to
+   * WINDOW for the duration of the drag — the drag keeps working even if
+   * setPointerCapture throws (some input devices) or the pointer leaves
+   * the element. The prototype's cropDrag, hardened. */
+  const dragRef = useRef<{
+    id: number; px: number; py: number; x: number; y: number;
+    last: { x: number; y: number };
+  } | null>(null);
+
   function onCropDown(e: React.PointerEvent) {
     if (!scene || scene.layout === "card") return;
-    (e.target as Element).setPointerCapture(e.pointerId);
-    setDragging(true);
-    dragStart.current = { px: e.clientX, py: e.clientY, x: cropPos.x, y: cropPos.y };
     e.preventDefault();
-  }
-  function onCropMove(e: React.PointerEvent) {
-    if (!dragging || !srcRef.current) return;
-    const r = srcRef.current.getBoundingClientRect();
-    const d = dragStart.current;
-    if (box.axis === "x") {
-      const x = Math.max(0, Math.min(1 - box.w, d.x + (e.clientX - d.px) / r.width));
-      setLocalCrops((m) => ({ ...m, [cropKey]: { x, y: 0 } }));
-    } else {
-      const y = Math.max(0, Math.min(1 - box.h, d.y + (e.clientY - d.py) / r.height));
-      setLocalCrops((m) => ({ ...m, [cropKey]: { x: 0, y } }));
-    }
-  }
-  function onCropUp(e: React.PointerEvent) {
-    if (!dragging) return;
-    setDragging(false);
-    try { (e.target as Element).releasePointerCapture(e.pointerId); } catch {}
-    void saveCrop(localCrops[cropKey] ?? cropPos);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
+    dragRef.current = {
+      id: e.pointerId, px: e.clientX, py: e.clientY,
+      x: cropPos.x, y: cropPos.y, last: { x: cropPos.x, y: cropPos.y },
+    };
+    setDragging(true);
+
+    const onMove = (ev: PointerEvent) => {
+      const d = dragRef.current;
+      if (!d || ev.pointerId !== d.id || !srcRef.current) return;
+      const r = srcRef.current.getBoundingClientRect();
+      const next = box.axis === "x"
+        ? { x: Math.max(0, Math.min(1 - box.w, d.x + (ev.clientX - d.px) / r.width)), y: 0 }
+        : { x: 0, y: Math.max(0, Math.min(1 - box.h, d.y + (ev.clientY - d.py) / r.height)) };
+      d.last = next;
+      setLocalCrops((m) => ({ ...m, [cropKey]: next }));
+    };
+    const onUp = (ev: PointerEvent) => {
+      const d = dragRef.current;
+      if (!d || ev.pointerId !== d.id) return;
+      dragRef.current = null;
+      setDragging(false);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      void saveCrop(d.last);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
   }
   function onCropKey(e: React.KeyboardEvent) {
     if (!scene || scene.layout === "card") return;
@@ -616,9 +634,6 @@ export default function Builder({
                   top: `${(box.axis === "y" ? cropPos.y : 0) * 100}%`,
                 }}
                 onPointerDown={onCropDown}
-                onPointerMove={onCropMove}
-                onPointerUp={onCropUp}
-                onPointerCancel={onCropUp}
                 onKeyDown={onCropKey}
               >
                 <div className="thirds">
