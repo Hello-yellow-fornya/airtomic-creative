@@ -15,6 +15,7 @@ Idempotent: a re-run replaces the video's transcripts rather than appending,
 so a retried or double-claimed job can't leave duplicates.
 """
 
+import logging
 import mimetypes
 import tempfile
 from pathlib import Path
@@ -24,6 +25,9 @@ import psycopg
 
 from . import db, media, modal_client, pipeline, r2
 from .config import Config
+
+
+log = logging.getLogger("worker.ingest")
 
 
 class IngestError(Exception):
@@ -87,8 +91,13 @@ def handle(conn: psycopg.Connection, cfg: Config, s3, job: dict[str, Any]) -> No
 
     db.set_video_status(conn, video_id, "transcribing", "waiting on whisperx")
     result = modal_client.transcribe(
-        cfg.modal_transcribe_url, cfg.modal_token, audio_url
+        cfg.modal_transcribe_url, cfg.modal_token, audio_url, diarise=cfg.diarise
     )
+    if result.get("diarisation_error"):
+        log.warning(
+            "video %s: diarisation degraded, transcript has no speaker labels: %s",
+            video_id, result["diarisation_error"],
+        )
 
     _write_transcript(conn, video_id, result)
 

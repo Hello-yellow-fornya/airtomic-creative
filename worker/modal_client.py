@@ -24,6 +24,7 @@ def transcribe(
     audio_url: str,
     min_speakers: int | None = None,
     max_speakers: int | None = None,
+    diarise: bool = True,
 ) -> dict[str, Any]:
     headers = {"Authorization": f"Bearer {token}"}
 
@@ -33,6 +34,7 @@ def transcribe(
             "audio_url": audio_url,
             "min_speakers": min_speakers,
             "max_speakers": max_speakers,
+            "diarise": diarise,
         },
         headers=headers,
         timeout=60,

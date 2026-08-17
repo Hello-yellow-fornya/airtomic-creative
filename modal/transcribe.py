@@ -39,6 +39,47 @@ MODELS_DIR = "/models"
 app = modal.App("airtomic-transcribe")
 
 
+DIARISATION_MODEL = "pyannote/speaker-diarization-3.1"
+GATED_REPOS = (DIARISATION_MODEL, "pyannote/segmentation-3.0")
+
+
+def _validate_hf_access(token: str) -> None:
+    """Fail fast, with a precise reason, if the HF token can't reach the
+    gated pyannote repos. Runs first in the image bake, so a bad secret
+    fails the DEPLOY — not the first transcription."""
+    import requests
+
+    if not token or not token.startswith("hf_"):
+        raise RuntimeError(
+            "HF_TOKEN missing or malformed in the 'huggingface' Modal secret "
+            "(expected a token starting with hf_)."
+        )
+    r = requests.get(
+        "https://huggingface.co/api/whoami-v2",
+        headers={"Authorization": f"Bearer {token}"}, timeout=30,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(
+            f"HF_TOKEN rejected by Hugging Face (whoami returned {r.status_code}). "
+            "Update the 'huggingface' Modal secret: "
+            "modal secret create huggingface HF_TOKEN=<token> --force"
+        )
+    account = r.json().get("name", "<unknown>")
+    for repo in GATED_REPOS:
+        r = requests.get(
+            f"https://huggingface.co/{repo}/resolve/main/config.yaml",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30, allow_redirects=True,
+        )
+        if r.status_code != 200:
+            raise RuntimeError(
+                f"HF token (account '{account}') cannot access gated repo "
+                f"{repo} (HTTP {r.status_code}). Accept the terms at "
+                f"https://huggingface.co/{repo} while logged into that "
+                "account — BOTH gated repos must be accepted (see CLAUDE.md)."
+            )
+
+
 def _download_models() -> None:
     """Bake model weights into the image at build time (see CLAUDE.md known
     traps) — otherwise every cold start re-downloads several GB."""
@@ -51,6 +92,13 @@ def _download_models() -> None:
     import torch
     import whisperx
     from pyannote.audio import Pipeline
+
+    # Cache-bust knob: Modal caches this layer on the function's source, so
+    # bump this number to force a clean re-bake of all model weights
+    # (e.g. after fixing a bad HF secret). MODAL_FORCE_BUILD=1 also works.
+    bake_version = 2
+
+    _validate_hf_access(os.environ.get("HF_TOKEN", ""))
 
     # whisperx 3.1.5 fetches its VAD model from a hardcoded S3 bucket that no
     # longer exists (returns 301, no followable Location). The byte-identical
@@ -79,9 +127,19 @@ def _download_models() -> None:
     # Only English is baked. Another language would download its alignment
     # model on first use — works, but slow once. Klira content is English.
     whisperx.load_align_model(language_code="en", device=device)
-    Pipeline.from_pretrained(
-        "pyannote/speaker-diarization-3.1", use_auth_token=os.environ["HF_TOKEN"]
+    pipeline = Pipeline.from_pretrained(
+        DIARISATION_MODEL, use_auth_token=os.environ["HF_TOKEN"]
     )
+    # from_pretrained returns None (not an exception) when the gated repo is
+    # inaccessible — without this check the failure surfaces later as a bare
+    # AttributeError inside whisperx.
+    if pipeline is None:
+        raise RuntimeError(
+            f"Pipeline.from_pretrained({DIARISATION_MODEL!r}) returned None — "
+            "the HF token cannot access the gated model. Accept the terms for "
+            f"BOTH {' and '.join(GATED_REPOS)} under the token's account, and "
+            "check the 'huggingface' Modal secret."
+        )
 
 
 gpu_image = (
@@ -140,10 +198,51 @@ gpu_image = (
     timeout=60 * 60,
     secrets=[modal.Secret.from_name("huggingface")],
 )
+def _diarise(result, audio, device: str, min_speakers, max_speakers):
+    """Run pyannote diarisation and assign word speakers. Raises with a
+    clear message on any failure — the caller decides whether to degrade."""
+    import pandas as pd
+    import torch
+    import whisperx
+    from pyannote.audio import Pipeline
+
+    pipeline = Pipeline.from_pretrained(
+        DIARISATION_MODEL, use_auth_token=os.environ["HF_TOKEN"]
+    )
+    if pipeline is None:
+        raise RuntimeError(
+            f"Pipeline.from_pretrained({DIARISATION_MODEL!r}) returned None — "
+            f"the HF token cannot access the gated model. Accept the terms for "
+            f"BOTH {' and '.join(GATED_REPOS)} under the token's account, "
+            "update the 'huggingface' Modal secret, and rebuild the image "
+            "(bump bake_version in _download_models or MODAL_FORCE_BUILD=1)."
+        )
+    pipeline.to(torch.device(device))
+
+    kwargs = {}
+    if min_speakers is not None:
+        kwargs["min_speakers"] = min_speakers
+    if max_speakers is not None:
+        kwargs["max_speakers"] = max_speakers
+    annotation = pipeline(
+        {"waveform": torch.from_numpy(audio).unsqueeze(0), "sample_rate": 16000},
+        **kwargs,
+    )
+    diarize_df = pd.DataFrame(
+        (
+            (segment.start, segment.end, speaker)
+            for segment, _, speaker in annotation.itertracks(yield_label=True)
+        ),
+        columns=["start", "end", "speaker"],
+    )
+    return whisperx.assign_word_speakers(diarize_df, result)
+
+
 def transcribe(
     audio_url: str,
     min_speakers: int | None = None,
     max_speakers: int | None = None,
+    diarise: bool = True,
 ) -> dict:
     import gc
     import tempfile
@@ -182,17 +281,22 @@ def transcribe(
     )
     _release(align_model)
 
-    diarize = whisperx.DiarizationPipeline(
-        use_auth_token=os.environ["HF_TOKEN"], device=device
-    )
-    diarize_kwargs = {}
-    if min_speakers is not None:
-        diarize_kwargs["min_speakers"] = min_speakers
-    if max_speakers is not None:
-        diarize_kwargs["max_speakers"] = max_speakers
-    diarize_segments = diarize(audio, **diarize_kwargs)
-    result = whisperx.assign_word_speakers(diarize_segments, result)
-    _release(diarize)
+    # Diarisation is optional and NEVER fails the job: a broken token,
+    # missing gated-model access, or a pyannote error degrades to a
+    # transcript without speaker labels.
+    speakers_assigned = False
+    diarisation_error = None
+    if diarise:
+        try:
+            result = _diarise(result, audio, device, min_speakers, max_speakers)
+            speakers_assigned = True
+        except Exception as exc:
+            diarisation_error = f"{type(exc).__name__}: {exc}"
+            print(f"diarisation failed — continuing without speaker labels: "
+                  f"{diarisation_error}")
+        finally:
+            gc.collect()
+            torch.cuda.empty_cache()
 
     segments = [
         {
@@ -220,7 +324,8 @@ def transcribe(
         "engine": "whisperx",
         "model": WHISPER_MODEL,
         "language": language,
-        "diarised": True,
+        "diarised": speakers_assigned,
+        "diarisation_error": diarisation_error,
         "duration_s": round(len(audio) / 16000.0, 3),
         "segments": segments,
     }
@@ -258,6 +363,7 @@ def api():
             audio_url,
             min_speakers=body.get("min_speakers"),
             max_speakers=body.get("max_speakers"),
+            diarise=body.get("diarise", True),
         )
         return {"call_id": call.object_id}
 
