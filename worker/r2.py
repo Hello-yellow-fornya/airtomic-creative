@@ -95,3 +95,7 @@ def download_file(s3, bucket: str, key: str, dest_path: str) -> None:
 
 def upload_file(s3, bucket: str, key: str, src_path: str, content_type: str) -> None:
     s3.upload_file(src_path, bucket, key, ExtraArgs={"ContentType": content_type})
+
+
+def get_bytes(s3, bucket: str, key: str) -> bytes:
+    return s3.get_object(Bucket=bucket, Key=key)["Body"].read()

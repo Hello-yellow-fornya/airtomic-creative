@@ -52,7 +52,9 @@ On Railway:
    must be the repo root or the worker package won't copy.
 3. Variables: `DATABASE_URL`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
    `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `MODAL_TRANSCRIBE_URL`,
-   `MODAL_TOKEN`, `INGEST_TOKEN`. Railway injects `PORT` itself.
+   `MODAL_TOKEN`, `INGEST_TOKEN`, `ANTHROPIC_API_KEY` (creative tagging;
+   optional `ANTHROPIC_MODEL` overrides the default `claude-opus-5`).
+   Railway injects `PORT` itself.
 4. Settings → Networking → **Generate Domain** so the web trigger is
    reachable. Logs should show `worker up` and `web trigger listening`.
 

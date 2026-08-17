@@ -22,7 +22,7 @@ from typing import Any
 
 import psycopg
 
-from . import db, media, modal_client, r2
+from . import db, media, modal_client, pipeline, r2
 from .config import Config
 
 
@@ -46,20 +46,20 @@ def handle(conn: psycopg.Connection, cfg: Config, s3, job: dict[str, Any]) -> No
         storage_uri = video["storage_uri"]
 
         if storage_uri.startswith(("http://", "https://")):
-            _set_status(conn, video_id, "transcribing", "fetching source from url")
+            db.set_video_status(conn, video_id, "transcribing", "fetching source from url")
             src_path = _fetch_source(storage_uri, tmp)
             key = f"sources/{video_id}/{Path(src_path).name}"
             content_type = (
                 mimetypes.guess_type(src_path)[0] or "application/octet-stream"
             )
-            _set_status(conn, video_id, "transcribing", "archiving source to r2")
+            db.set_video_status(conn, video_id, "transcribing", "archiving source to r2")
             r2.upload_file(s3, cfg.r2_bucket, key, src_path, content_type)
             conn.execute(
                 "UPDATE videos SET storage_uri = %s WHERE id = %s",
                 (r2.make_uri(cfg.r2_bucket, key), video_id),
             )
         else:
-            _set_status(conn, video_id, "transcribing", "downloading source")
+            db.set_video_status(conn, video_id, "transcribing", "downloading source")
             bucket, key = r2.parse_uri(storage_uri)
             src_path = str(Path(tmp) / Path(key).name)
             r2.download_file(s3, bucket, key, src_path)
@@ -77,7 +77,7 @@ def handle(conn: psycopg.Connection, cfg: Config, s3, job: dict[str, Any]) -> No
         if not meta["has_audio"]:
             raise IngestError("source has no audio stream — nothing to transcribe")
 
-        _set_status(conn, video_id, "transcribing", "extracting audio")
+        db.set_video_status(conn, video_id, "transcribing", "extracting audio")
         media.extract_wav(src_path, wav_path)
 
         wav_key = f"audio/{video_id}.wav"
@@ -85,22 +85,14 @@ def handle(conn: psycopg.Connection, cfg: Config, s3, job: dict[str, Any]) -> No
 
     audio_url = r2.presign_get(s3, cfg.r2_bucket, wav_key)
 
-    _set_status(conn, video_id, "transcribing", "waiting on whisperx")
+    db.set_video_status(conn, video_id, "transcribing", "waiting on whisperx")
     result = modal_client.transcribe(
         cfg.modal_transcribe_url, cfg.modal_token, audio_url
     )
 
     _write_transcript(conn, video_id, result)
 
-    # This slice ends at transcription. Later slices insert scene detection
-    # and tagging between here and 'ready'.
-    _set_status(conn, video_id, "ready", "transcribed")
-
-
-def on_permanent_failure(conn: psycopg.Connection, job: dict[str, Any], error: str) -> None:
-    video_id = job["payload"].get("video_id")
-    if video_id:
-        _set_status(conn, video_id, "failed", error[:500])
+    pipeline.advance(conn, video_id, "ingest")
 
 
 def _fetch_source(url: str, dest_dir: str) -> str:
@@ -126,13 +118,6 @@ def _fetch_source(url: str, dest_dir: str) -> str:
     if not files:
         raise IngestError("fetch produced no file")
     return str(files[0])
-
-
-def _set_status(conn: psycopg.Connection, video_id: str, status: str, detail: str) -> None:
-    conn.execute(
-        "UPDATE videos SET status = %s, status_detail = %s WHERE id = %s",
-        (status, detail, video_id),
-    )
 
 
 def _write_transcript(

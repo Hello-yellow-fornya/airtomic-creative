@@ -17,6 +17,8 @@ class Config:
     concurrency: int
     ingest_token: str | None   # gates the web trigger; unset disables it
     port: int                  # Railway injects PORT
+    anthropic_api_key: str | None  # required by the tag stage only
+    anthropic_model: str
 
 
 def _require(name: str) -> str:
@@ -40,4 +42,6 @@ def load() -> Config:
         concurrency=int(os.environ.get("WORKER_CONCURRENCY", "2")),
         ingest_token=os.environ.get("INGEST_TOKEN") or None,
         port=int(os.environ.get("PORT", "8080")),
+        anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY") or None,
+        anthropic_model=os.environ.get("ANTHROPIC_MODEL", "claude-opus-5"),
     )

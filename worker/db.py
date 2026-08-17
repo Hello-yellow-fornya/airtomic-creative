@@ -71,6 +71,15 @@ def retry_or_fail_job(conn: psycopg.Connection, job: dict[str, Any], error: str)
     return False
 
 
+def set_video_status(
+    conn: psycopg.Connection, video_id: str, status: str, detail: str
+) -> None:
+    conn.execute(
+        "UPDATE videos SET status = %s, status_detail = %s WHERE id = %s",
+        (status, detail, video_id),
+    )
+
+
 def create_video_and_ingest_job(
     conn: psycopg.Connection,
     *,
