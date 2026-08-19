@@ -88,17 +88,20 @@ def create_video_and_ingest_job(
     source: str,
     uploaded_by: str | None,
     video_id: str | None = None,
+    meta_video_id: str | None = None,
 ) -> tuple[str, int]:
     """storage_uri may be r2:// (already uploaded) or http(s):// — the ingest
-    handler fetches URL sources into R2 itself."""
+    handler fetches URL sources into R2 itself. meta_video_id links an
+    ad-creative video to its ad_performance rows."""
     with conn.transaction():
         row = conn.execute(
             """
-            INSERT INTO videos (id, source, title, storage_uri, status, uploaded_by)
-            VALUES (coalesce(%s, uuid_generate_v4()), %s, %s, %s, 'queued', %s)
+            INSERT INTO videos (id, source, title, storage_uri, status,
+                                uploaded_by, meta_video_id)
+            VALUES (coalesce(%s, uuid_generate_v4()), %s, %s, %s, 'queued', %s, %s)
             RETURNING id
             """,
-            (video_id, source, title, storage_uri, uploaded_by),
+            (video_id, source, title, storage_uri, uploaded_by, meta_video_id),
         ).fetchone()
         job_id = enqueue_job(conn, "ingest", {"video_id": str(row["id"])})
     return str(row["id"]), job_id

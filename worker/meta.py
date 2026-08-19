@@ -193,6 +193,84 @@ class MetaClient:
             {"fields": "id,name,account_status,currency,timezone_name"},
         )
 
+    # -- backfill reads (ads_read is sufficient for all of these) -------
+
+    def ads_with_creatives(self, limit_total: int = 2000) -> list[dict]:
+        """Every ad on the account with its creative's video reference(s).
+        asset_feed_spec is fetched explicitly so multi-video ads can be
+        detected and reported rather than silently double-counted."""
+        return self.get_all(
+            f"{self.account}/ads",
+            {
+                "fields": "id,name,status,effective_status,adset_id,campaign_id,"
+                          "created_time,"
+                          "creative{id,video_id,object_type,object_story_spec,"
+                          "asset_feed_spec}",
+                "limit": 100,
+            },
+            cap=limit_total,
+        )
+
+    def insights_ad_level(
+        self,
+        since: str | None = None,
+        until: str | None = None,
+        limit_total: int = 2000,
+    ) -> list[dict]:
+        """Ad-level insights, RAW COUNTS ONLY — rates are computed at the
+        video_performance rollup, never imported (CLAUDE.md §2). Lifetime
+        aggregate per ad unless a since/until window is given."""
+        params: dict = {
+            "level": "ad",
+            "fields": "ad_id,ad_name,adset_id,campaign_id,objective,"
+                      "impressions,reach,spend,account_currency,"
+                      "actions,action_values,"
+                      "video_thruplay_watched_actions,"
+                      "video_15_sec_watched_actions,"
+                      "video_p25_watched_actions,video_p50_watched_actions,"
+                      "video_p75_watched_actions,video_p100_watched_actions,"
+                      "date_start,date_stop",
+            "use_unified_attribution_setting": "true",
+            "limit": 100,
+        }
+        if since or until:
+            import json as _json
+            params["time_range"] = _json.dumps(
+                {"since": since or "2000-01-01",
+                 "until": until or "2100-01-01"})
+        else:
+            params["date_preset"] = "maximum"
+        return self.get_all(f"{self.account}/insights", params, cap=limit_total)
+
+    def video_node(self, meta_video_id: str) -> dict:
+        """The ad video's metadata including its (short-lived) source URL —
+        callers must copy the file to R2 immediately, never store the URL."""
+        return self.get(
+            meta_video_id,
+            {"fields": "id,title,source,length,created_time"},
+        )
+
+
+def video_ids_of_ad(ad: dict) -> list[str]:
+    """Every distinct video id an ad's creative references. One id is the
+    normal case; several means asset_feed_spec dynamic creative — the exact
+    case where a video→ad spend join double-counts, so callers must handle
+    len > 1 explicitly, never average over it."""
+    creative = ad.get("creative") or {}
+    ids: list[str] = []
+
+    def add(v):
+        if v and str(v) not in ids:
+            ids.append(str(v))
+
+    add(creative.get("video_id"))
+    oss = creative.get("object_story_spec") or {}
+    add((oss.get("video_data") or {}).get("video_id"))
+    afs = creative.get("asset_feed_spec") or {}
+    for vid in afs.get("videos") or []:
+        add((vid or {}).get("video_id"))
+    return ids
+
     def diag(self) -> dict:
         """The full read-only proof: token scopes, version, account,
         campaigns and ad sets. Never writes anything."""

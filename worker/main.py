@@ -15,7 +15,10 @@ import threading
 import time
 import traceback
 
-from . import cleanup, config, db, ingest, pipeline, r2, render, scene_detect, tag, webapp
+from . import (
+    cleanup, config, db, ingest, pipeline, r2, recommend, render,
+    scene_detect, tag, webapp,
+)
 
 log = logging.getLogger("worker")
 
@@ -23,15 +26,19 @@ HANDLERS = {
     "ingest": ingest.handle,
     "scene_detect": scene_detect.handle,
     "tag": tag.handle,
+    "recommend": recommend.handle,
     "render": render.handle,
     "cleanup": cleanup.handle,
 }
 # Every ingest-pipeline stage shares one failure hook: mark the video failed.
 # Render failures stay on the job row (the variant has no failed state).
+# recommend is the exception: a video without suggestions is still usable,
+# so its failure hook marks the video ready with a note instead.
 FAILURE_HOOKS = {
     job_type: pipeline.on_permanent_failure
     for job_type in ("ingest", "scene_detect", "tag")
 }
+FAILURE_HOOKS["recommend"] = recommend.on_permanent_failure
 
 STUCK_SWEEP_INTERVAL_S = 300
 

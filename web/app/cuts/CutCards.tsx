@@ -7,7 +7,7 @@ type Card = {
   id: string; videoId: string; videoTitle: string | null; rank: number;
   start: number; end: number; score: number | null; quote: string | null;
   why: string | null; tags: string[]; n: number | null; stat: string | null;
-  flag: boolean;
+  evidence: string | null; flag: boolean;
 };
 
 const fmt = (t: number) => {
@@ -77,7 +77,7 @@ export default function CutCards({ cards }: { cards: Card[] }) {
               <span className="evidence">
                 {c.n !== null
                   ? `n=${c.n}${c.stat ? ` · ${c.stat}` : ""}${c.n < 3 ? " — weak evidence" : ""}`
-                  : "n=? · evidence not recorded — treat as unranked"}
+                  : c.evidence ?? "n=? · evidence not recorded — treat as unranked"}
               </span>
               <button className="btn sm" disabled={busy !== null} onClick={() => void open(c)}>
                 {busy === c.id ? "Opening…" : "Open"}

@@ -35,7 +35,7 @@ type LineT = { id: string; speaker: string | null; start: number; end: number; w
 type CutT = {
   id: string; rank: number; start: number; end: number;
   score: number | null; why: string | null; n: number | null;
-  stat: string | null; flag: boolean;
+  stat: string | null; evidence: string | null; flag: boolean;
 };
 
 const SPK_COLOURS = ["#25627F", "#8FA6B4", "#5F7F62", "#A08BA8"];
@@ -99,6 +99,28 @@ export default function Find({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [videoErr, setVideoErr] = useState(false);
+  const [recState, setRecState] = useState<"idle" | "queued" | "error">("idle");
+  const [recErr, setRecErr] = useState<string | null>(null);
+
+  // Queue content-based scoring for a video that predates the recommend
+  // stage; poll the server component a few times so results appear
+  // without a manual refresh.
+  const queueRecommend = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/videos/${video.id}/recommend`, { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? res.statusText);
+      setRecState("queued");
+      let polls = 0;
+      const t = setInterval(() => {
+        router.refresh();
+        if (++polls >= 12) clearInterval(t);
+      }, 10_000);
+    } catch (e) {
+      setRecErr(e instanceof Error ? e.message : String(e));
+      setRecState("error");
+    }
+  }, [video.id, router]);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const rafRef = useRef<number | null>(null);
@@ -765,8 +787,17 @@ export default function Find({
           {cuts.length > 0 ? (
             <span><i style={{ background: "var(--signal)" }} />Machine-suggested cut — click to load</span>
           ) : (
-            <span style={{ color: "var(--faint)" }}>
-              No suggested cuts yet — the recommendation engine hasn&apos;t run on this video.
+            <span style={{ color: "var(--faint)", display: "inline-flex", alignItems: "center", gap: 8 }}>
+              {recState === "queued"
+                ? "Scoring queued — suggestions appear here when it finishes (about a minute)."
+                : recState === "error"
+                  ? `Couldn't queue scoring: ${recErr}`
+                  : "No suggested cuts yet."}
+              {recState === "idle" && (
+                <button className="btn ghost sm" onClick={() => void queueRecommend()}>
+                  Generate suggested cuts
+                </button>
+              )}
             </span>
           )}
         </div>
@@ -859,7 +890,7 @@ export default function Find({
                     {" · "}
                     {b.cut.n !== null
                       ? `n=${b.cut.n}${b.cut.stat ? ` · ${b.cut.stat}` : ""}`
-                      : "n=? · evidence not recorded"}
+                      : b.cut.evidence ?? "n=? · evidence not recorded"}
                   </span>
                   <button onClick={() => loadCut(b.cut)}>Load</button>
                 </div>

@@ -90,7 +90,7 @@ export default async function VideoPage({
           }))}
           cuts={candidates.map((c, i) => {
             const tags = (c.matched_tags ?? {}) as {
-              n?: number; stat?: string; flag?: boolean;
+              n?: number; stat?: string; flag?: boolean; evidence?: string;
             };
             return {
               id: c.id,
@@ -101,6 +101,7 @@ export default async function VideoPage({
               why: c.rationale,
               n: typeof tags.n === "number" ? tags.n : null,
               stat: tags.stat ?? null,
+              evidence: typeof tags.evidence === "string" ? tags.evidence : null,
               flag: !!tags.flag,
             };
           })}

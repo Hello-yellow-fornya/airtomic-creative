@@ -10,6 +10,8 @@ Stage -> active video status (set by each handler when it starts work):
     ingest       -> transcribing
     scene_detect -> detecting
     tag          -> tagging
+    recommend    -> tagging (detail: finding candidate cuts — no new enum
+                   value, so the upload panel's stage list stays valid)
 """
 
 from typing import Any
@@ -18,7 +20,7 @@ import psycopg
 
 from . import db
 
-SEQUENCE = ["ingest", "scene_detect", "tag"]
+SEQUENCE = ["ingest", "scene_detect", "tag", "recommend"]
 
 
 def advance(conn: psycopg.Connection, video_id: str, completed_stage: str) -> None:

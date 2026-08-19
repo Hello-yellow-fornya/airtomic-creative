@@ -60,11 +60,19 @@ export default async function CutsPage({
         <div className="stack">
           {candidates.length > 0 && (
             <div className="note">
-              <strong>These are prompts, not verdicts.</strong> Scored against{" "}
-              {corpusN > 0 ? `${corpusN} Klira creatives with performance data` : "the Klira ad corpus"} —
-              enough to spot patterns, not enough to prove causation. Sample
-              size is shown on every card. Check the evidence before you trust
-              the ranking.
+              <strong>These are prompts, not verdicts.</strong>{" "}
+              {corpusN > 0 ? (
+                <>Scored against {corpusN} Klira creatives with performance
+                data — enough to spot patterns, not enough to prove causation.
+                Sample size is shown on every card.</>
+              ) : (
+                <>Ranked on content features only — hook structure, complete
+                thoughts, single-speaker openings. No performance data has
+                been imported yet, so there is no sample size to show. When
+                the ad back catalogue lands, a performance term is added and
+                every card gains a real n=.</>
+              )}{" "}
+              Check the evidence before you trust the ranking.
             </div>
           )}
           {candidates.length === 0 ? (
@@ -73,11 +81,13 @@ export default async function CutsPage({
                 No suggested cuts yet.
               </div>
               <p style={{ maxWidth: 480, margin: "0 auto", lineHeight: 1.6 }}>
-                The recommendation engine hasn&apos;t run{video ? " on this video" : ""}.
-                It needs a transcript, scene detection and creative tags on the
-                source video, plus the ad back catalogue with spend data to
-                score patterns against{corpusN === 0 ? " — the Airtomic performance import isn't wired yet" : ""}.
-                Until it runs, cut clips by selecting a passage in the
+                The scorer hasn&apos;t run{video ? " on this video" : ""}. It
+                needs a transcript on the source video; new ingests are scored
+                automatically as the last pipeline stage, and older videos have
+                a &ldquo;Generate suggested cuts&rdquo; button on their Find
+                screen. Scoring is content-based for now
+                {corpusN === 0 ? " — the performance import hasn't run yet, so there's no n= to show" : ""}.
+                You can always cut clips by selecting a passage in the
                 transcript.
               </p>
             </div>
@@ -85,7 +95,8 @@ export default async function CutsPage({
             <CutCards
               cards={candidates.map((c, i) => {
                 const tags = (c.matched_tags ?? {}) as {
-                  tags?: string[]; n?: number; stat?: string; flag?: boolean;
+                  tags?: string[]; features?: string[]; n?: number;
+                  stat?: string; flag?: boolean; evidence?: string;
                 };
                 return {
                   id: c.id,
@@ -97,9 +108,10 @@ export default async function CutsPage({
                   score: c.score ? parseFloat(c.score) : null,
                   quote: quotes.get(c.id) ?? null,
                   why: c.rationale,
-                  tags: tags.tags ?? [],
+                  tags: tags.tags ?? tags.features ?? [],
                   n: typeof tags.n === "number" ? tags.n : null,
                   stat: tags.stat ?? null,
+                  evidence: typeof tags.evidence === "string" ? tags.evidence : null,
                   flag: !!tags.flag,
                 };
               })}
