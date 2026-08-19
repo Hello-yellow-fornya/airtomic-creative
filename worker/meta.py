@@ -68,7 +68,8 @@ class MetaClient:
             ad_account_id if ad_account_id.startswith("act_")
             else f"act_{ad_account_id}"
         )
-        self.version = api_version if api_version.startswith("v") else f"v{api_version}"
+        # normalise "26.0" / "v26.0" / "V26.0" alike
+        self.version = f"v{api_version.strip().lstrip('vV')}"
         self.page_id = page_id
         self.instagram_actor_id = instagram_actor_id
 

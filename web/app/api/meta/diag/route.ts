@@ -43,7 +43,7 @@ async function nativeDiag() {
   const rawAccount = process.env.META_AD_ACCOUNT_ID!;
   const account = rawAccount.startsWith("act_") ? rawAccount : `act_${rawAccount}`;
   const rawVer = process.env.META_API_VERSION || "v26.0";
-  const ver = rawVer.startsWith("v") ? rawVer : `v${rawVer}`;
+  const ver = `v${rawVer.trim().replace(/^[vV]+/, "")}`;
   const out: Record<string, unknown> = {
     ran_from: "vercel",
     identity: {
