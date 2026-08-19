@@ -30,7 +30,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlparse
 
-from . import db, r2
+from . import db, meta, r2
 from .config import Config
 
 log = logging.getLogger("worker.web")
@@ -212,6 +212,43 @@ def make_server(cfg: Config) -> ThreadingHTTPServer:
 
             # Source video presign — the builder's <video> element points at
             # the web app's proxy, which 302s here, which 303s to R2.
+            # Read-only Meta diagnostics: token scopes, version check,
+            # campaigns + ad sets. Proves the credentials end to end
+            # without creating anything on the account.
+            if url.path == "/meta/diag":
+                if not authed(key):
+                    self._json(401, {"error": "unauthorised"})
+                    return
+                missing = [
+                    n for n, v in (
+                        ("META_APP_ID", cfg.meta_app_id),
+                        ("META_APP_SECRET", cfg.meta_app_secret),
+                        ("META_SYSTEM_USER_TOKEN", cfg.meta_system_user_token),
+                        ("META_AD_ACCOUNT_ID", cfg.meta_ad_account_id),
+                    ) if not v
+                ]
+                if missing:
+                    self._json(409, {"error": "meta not configured",
+                                     "missing": missing})
+                    return
+                client = meta.MetaClient(
+                    app_id=cfg.meta_app_id,
+                    app_secret=cfg.meta_app_secret,
+                    access_token=cfg.meta_system_user_token,
+                    ad_account_id=cfg.meta_ad_account_id,
+                    api_version=cfg.meta_api_version,
+                    page_id=cfg.meta_page_id,
+                    instagram_actor_id=cfg.meta_instagram_actor_id,
+                )
+                self._json(200, {
+                    "identity": {
+                        "page_id_set": bool(cfg.meta_page_id),
+                        "instagram_actor_id_set": bool(cfg.meta_instagram_actor_id),
+                    },
+                    **client.diag(),
+                })
+                return
+
             m = re.fullmatch(r"/media/([0-9a-f-]{36})", url.path)
             if m:
                 self._presign_lookup(
