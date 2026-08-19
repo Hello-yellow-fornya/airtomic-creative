@@ -87,9 +87,10 @@ RECOMMEND_SCHEMA = {
     "additionalProperties": False,
     "required": ["candidates"],
     "properties": {
+        # no maxItems — structured outputs reject it on arrays; the prompt
+        # asks for at most MAX_CANDIDATES and _prepare_rows enforces the cap
         "candidates": {
             "type": "array",
-            "maxItems": MAX_CANDIDATES,
             "items": {
                 "type": "object",
                 "additionalProperties": False,
