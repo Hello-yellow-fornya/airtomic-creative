@@ -219,12 +219,14 @@ def make_server(cfg: Config) -> ThreadingHTTPServer:
                 if not authed(key):
                     self._json(401, {"error": "unauthorised"})
                     return
+                # The account id is optional for diagnostics: without it the
+                # client lists the ad accounts the token can reach instead
+                # of campaigns/ad sets — which reveals the right id.
                 missing = [
                     n for n, v in (
                         ("META_APP_ID", cfg.meta_app_id),
                         ("META_APP_SECRET", cfg.meta_app_secret),
                         ("META_SYSTEM_USER_TOKEN", cfg.meta_system_user_token),
-                        ("META_AD_ACCOUNT_ID", cfg.meta_ad_account_id),
                     ) if not v
                 ]
                 if missing:
@@ -235,7 +237,7 @@ def make_server(cfg: Config) -> ThreadingHTTPServer:
                     app_id=cfg.meta_app_id,
                     app_secret=cfg.meta_app_secret,
                     access_token=cfg.meta_system_user_token,
-                    ad_account_id=cfg.meta_ad_account_id,
+                    ad_account_id=cfg.meta_ad_account_id or "",
                     api_version=cfg.meta_api_version,
                     page_id=cfg.meta_page_id,
                     instagram_actor_id=cfg.meta_instagram_actor_id,
@@ -244,6 +246,7 @@ def make_server(cfg: Config) -> ThreadingHTTPServer:
                     "identity": {
                         "page_id_set": bool(cfg.meta_page_id),
                         "instagram_actor_id_set": bool(cfg.meta_instagram_actor_id),
+                        "ad_account_id_set": bool(cfg.meta_ad_account_id),
                     },
                     **client.diag(),
                 })

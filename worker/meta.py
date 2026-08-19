@@ -177,6 +177,15 @@ class MetaClient:
             },
         )
 
+    def accessible_ad_accounts(self) -> list[dict]:
+        """Ad accounts this token can act on — the fallback read when
+        META_AD_ACCOUNT_ID is missing or wrong."""
+        return self.get_all(
+            "me/adaccounts",
+            {"fields": "id,name,account_status,currency,timezone_name",
+             "limit": 100},
+        )
+
     def account_info(self) -> dict:
         return self.get(
             self.account,
@@ -186,14 +195,20 @@ class MetaClient:
     def diag(self) -> dict:
         """The full read-only proof: token scopes, version, account,
         campaigns and ad sets. Never writes anything."""
-        out: dict[str, Any] = {}
-        for key, fn in (
+        checks: list[tuple[str, Any]] = [
             ("token", self.debug_token),
             ("version", self.version_check),
-            ("account", self.account_info),
-            ("campaigns", self.campaigns),
-            ("adsets", self.adsets),
-        ):
+        ]
+        if self.account != "act_":   # META_AD_ACCOUNT_ID present
+            checks += [
+                ("account", self.account_info),
+                ("campaigns", self.campaigns),
+                ("adsets", self.adsets),
+            ]
+        else:
+            checks.append(("accessible_ad_accounts", self.accessible_ad_accounts))
+        out: dict[str, Any] = {}
+        for key, fn in checks:
             try:
                 out[key] = fn()
             except MetaError as exc:
