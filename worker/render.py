@@ -144,14 +144,14 @@ def render_variant(conn: psycopg.Connection, cfg: Config, s3, variant_id: str,
 
     # Text overlays: a layer above subtitles, times on the output timeline.
     ovs = conn.execute(
-        "SELECT text, start_s, end_s, position, style FROM clip_overlays "
+        "SELECT text, start_s, end_s, position, style, sv FROM clip_overlays "
         "WHERE variant_id = %s ORDER BY idx",
         (variant_id,),
     ).fetchall()
     ov_dicts = [
         {"text": o["text"], "start_s": float(o["start_s"]),
          "end_s": float(o["end_s"]), "position": o["position"],
-         "style": o["style"]}
+         "style": o["style"], "sv": o["sv"]}
         for o in ovs
     ]
     overlay_ass_path = None
@@ -168,7 +168,7 @@ def render_variant(conn: psycopg.Connection, cfg: Config, s3, variant_id: str,
         ))
         sub_vp = float({**subtitles.DEFAULT_PRESET, **(preset or {})}["vp"]) / 100
         vp_for = lambda s, e: overlays.subtitle_shift_for(  # noqa: E731
-            s, e, ov_dicts, ratio, sub_vp)
+            s, e, ov_dicts, ratio, sub_vp, styles)
 
     ass_path = str(Path(workdir) / "subs.ass")
     Path(ass_path).write_text(

@@ -1,7 +1,8 @@
 """Overlay ASS generation, safe-zone positioning, subtitle collision."""
 
 from worker.overlays import (
-    build_overlay_ass, overlay_band, position_y, subtitle_shift_for,
+    build_overlay_ass, overlay_band, overlay_vp, position_y,
+    resolve_cfg, subtitle_shift_for,
 )
 
 STYLES = {
@@ -14,9 +15,18 @@ STYLES = {
 }
 
 
-def OV(text="Hook line", start=0.0, end=3.0, position="top", style="hook"):
+def OV(text="Hook line", start=0.0, end=3.0, position="top", style="hook",
+       sv=None):
     return {"text": text, "start_s": start, "end_s": end,
-            "position": position, "style": style}
+            "position": position, "style": style, "sv": sv}
+
+
+def SV(**over):
+    base = {"fs": 44, "ol": 0, "vp": 76, "wpl": None, "color": "#FFFFFF",
+            "bg": "pill", "bg_color": "#0A0B0D", "bg_alpha": 0.75,
+            "caps": False, "weight": 800}
+    base.update(over)
+    return base
 
 
 def test_positions_respect_9x16_safe_zones():
@@ -62,16 +72,44 @@ def test_fontsize_scales_with_output_width():
 
 
 def test_subtitles_pushed_down_only_when_colliding():
-    # subtitle at 72%; lower_third overlay occupies ~73-83% -> collision
+    # subtitle at 72%; lower_third overlay WITH a background -> collision
     ovs = [OV(position="lower_third", start=0, end=3)]
-    shifted = subtitle_shift_for(1.0, 1.4, ovs, "9x16", 0.72)
-    band = overlay_band("lower_third", "9x16")
+    shifted = subtitle_shift_for(1.0, 1.4, ovs, "9x16", 0.72, STYLES)
+    band = overlay_band(overlay_vp(ovs[0], STYLES, "9x16"))
     assert shifted > band[1]                          # pushed below the overlay
     assert shifted <= 1 - 0.16 + 0.04 + 1e-9          # capped near the safe zone
     # outside the overlay's time window: untouched
-    assert subtitle_shift_for(4.0, 4.4, ovs, "9x16", 0.72) == 0.72
+    assert subtitle_shift_for(4.0, 4.4, ovs, "9x16", 0.72, STYLES) == 0.72
     # a top hook never collides with subtitles at 72%
-    assert subtitle_shift_for(1.0, 1.4, [OV(position="top")], "9x16", 0.72) == 0.72
+    assert subtitle_shift_for(
+        1.0, 1.4, [OV(position="top")], "9x16", 0.72, STYLES) == 0.72
+
+
+def test_backgroundless_overlay_never_pushes_subtitles():
+    # same band as the subtitle, but bg none: text over text is a design
+    # choice, not a collision
+    naked = OV(sv=SV(vp=72, bg="none"))
+    assert subtitle_shift_for(1.0, 1.4, [naked], "9x16", 0.72) == 0.72
+    # give it a pill and the same overlay pushes
+    pilled = OV(sv=SV(vp=72, bg="pill"))
+    assert subtitle_shift_for(1.0, 1.4, [pilled], "9x16", 0.72) > 0.72
+    # a CENTRE overlay with no background: no push (the brief's example)
+    centre = OV(sv=SV(vp=50, bg="none"))
+    assert subtitle_shift_for(1.0, 1.4, [centre], "9x16", 0.72) == 0.72
+
+
+def test_sv_drives_burn_style_and_position():
+    ov = OV(sv=SV(fs=60, color="#FF6B8A", bg="box", bg_color="#14171C",
+                  bg_alpha=1.0, vp=33))
+    ass = build_overlay_ass([ov], {}, "9x16", 1080, 1920, 10)
+    assert "Style: Ov0,Plus Jakarta Sans,60," in ass    # resolved fs, no preset
+    assert "&H008A6BFF&" in ass                          # text colour BGR
+    assert "&H001C1714&" in ass                          # opaque bg colour
+    assert f"\\pos(540,{round(0.33 * 1920)})" in ass   # vp, not position enum
+    # wpl rewrap: 5 words at wpl=2 -> two \N breaks
+    wrapped = OV(text="one two three four five", sv=SV(wpl=2, vp=20))
+    ass2 = build_overlay_ass([wrapped], {}, "9x16", 1080, 1920, 10)
+    assert "one two\\Nthree four\\Nfive" in ass2
 
 
 def test_unknown_style_key_falls_back_to_defaults():

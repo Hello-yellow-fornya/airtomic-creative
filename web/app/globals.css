@@ -1025,3 +1025,13 @@ table.lib-list tbody tr:hover td{background:var(--paper)}
   color:var(--muted);white-space:nowrap;opacity:0;transition:opacity .1s}
 .vrow:hover .addvar,.vrow.sel .addvar{opacity:1}
 .addvar:hover{border-color:var(--ink);color:var(--ink)}
+
+/* Overlay timing fields + shared Text style panel selection */
+.ovrow.sel{box-shadow:inset 3px 0 0 var(--ink);background:var(--paper)}
+.ovrow{cursor:pointer;border-radius:var(--radius);padding:4px}
+.ovlbl{font-size:9.5px;color:var(--faint);letter-spacing:.06em;text-transform:uppercase}
+.ovtime{width:86px;padding:3px 5px;font-size:10.5px;border:1px solid var(--line);
+  border-radius:3px;background:var(--surface)}
+.ovtime:focus{outline:none;border-color:var(--ink)}
+.ovtime.bad{border-color:#B00020;color:#B00020}
+.ovdash{color:var(--faint);font-size:10px}

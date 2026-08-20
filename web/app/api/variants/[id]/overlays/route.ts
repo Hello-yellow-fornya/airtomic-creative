@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
 import { UUID_RE } from "@/lib/worker";
-import { markStale } from "@/lib/overlays";
+import { markStale, svFromPreset } from "@/lib/overlays";
 
 export const dynamic = "force-dynamic";
 
@@ -24,18 +24,24 @@ export async function POST(
   if (end <= start)
     return NextResponse.json({ error: "end must be after start" }, { status: 400 });
 
-  const styleOk = await pool.query(
-    "SELECT 1 FROM overlay_style_presets WHERE key = $1", [style]);
-  if (!styleOk.rowCount)
+  const presetRow = await pool.query(
+    "SELECT config, config->>'default_position' AS dp FROM overlay_style_presets WHERE key = $1",
+    [style]);
+  if (!presetRow.rowCount)
     return NextResponse.json({ error: `unknown style '${style}'` }, { status: 400 });
 
+  // resolved values are stored on the overlay — the preset is only a seed
+  const pos = POSITIONS.has(body.position)
+    ? body.position : (presetRow.rows[0].dp ?? position);
+  const sv = svFromPreset(presetRow.rows[0].config, pos);
+
   const res = await pool.query(
-    `INSERT INTO clip_overlays (variant_id, idx, text, start_s, end_s, position, style)
+    `INSERT INTO clip_overlays (variant_id, idx, text, start_s, end_s, position, style, sv)
      SELECT $1::uuid, coalesce(max(idx) + 1, 0), $2::text,
-            $3::numeric, $4::numeric, $5::text, $6::text
+            $3::numeric, $4::numeric, $5::text, $6::text, $7::jsonb
      FROM clip_overlays WHERE variant_id = $1::uuid
-     RETURNING id::text, idx, text, start_s::text, end_s::text, position, style`,
-    [id, text, start, end, position, style],
+     RETURNING id::text, idx, text, start_s::text, end_s::text, position, style, sv`,
+    [id, text, start, end, pos, style, JSON.stringify(sv)],
   );
   if (!res.rowCount)
     return NextResponse.json({ error: "variant not found" }, { status: 404 });

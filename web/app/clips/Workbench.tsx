@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { exportFilename } from "@/lib/adname";
-import Builder, { type ComparePayload } from "../variants/[id]/Builder";
+import Builder, { type ComparePayload, type OvSv } from "../variants/[id]/Builder";
 
 type GroupScene = {
   id: string; idx: number; layout: string; in: number | null;
@@ -27,7 +27,7 @@ type GroupVariant = {
   renderStale: boolean; ratios: string[]; scenes: GroupScene[];
   presetId: string | null; overrides: Record<string, unknown>;
   renderStatus: string | null; renderError: string | null;
-  overlays: { id: string; text: string; start: number; end: number; position: string; style: string }[];
+  overlays: { id: string; text: string; start: number; end: number; position: string; style: string; sv: OvSv | null }[];
   crops: { sceneId: string; ratio: string; x: number; y: number; w: number; h: number }[];
 };
 
@@ -49,7 +49,7 @@ type EditorPayload = {
   crops: { sceneId: string; ratio: string; x: number; y: number; w: number; h: number }[];
   assets: { id: string; name: string; kind: string }[];
   presets: { id: string; name: string; is_default: boolean; config: Record<string, unknown> }[];
-  overlays: { id: string; text: string; start: number; end: number; position: string; style: string }[];
+  overlays: { id: string; text: string; start: number; end: number; position: string; style: string; sv: OvSv | null }[];
   overlayStyles: { key: string; name: string; config: Record<string, unknown> }[];
   renderStale: boolean;
   words: { w: string; s: number; e: number }[];

@@ -87,9 +87,9 @@ export async function GET(
       ),
       q<{
         id: string; idx: number; text: string; start_s: string; end_s: string;
-        position: string; style: string;
+        position: string; style: string; sv: Record<string, unknown> | null;
       }>(
-        `SELECT id::text, idx, text, start_s::text, end_s::text, position, style
+        `SELECT id::text, idx, text, start_s::text, end_s::text, position, style, sv
          FROM clip_overlays WHERE variant_id = $1 ORDER BY idx`,
         [id],
       ),
@@ -112,13 +112,14 @@ export async function GET(
         id: string; label: string; name: string;
         ov_text: string | null; ov_start: string | null; ov_end: string | null;
         ov_position: string | null; ov_style: string | null;
+        ov_sv: Record<string, unknown> | null;
       }>(
         orphan
-          ? "SELECT NULL::text AS id, NULL AS label, NULL AS name, NULL AS ov_text, NULL AS ov_start, NULL AS ov_end, NULL AS ov_position, NULL AS ov_style WHERE false"
+          ? "SELECT NULL::text AS id, NULL AS label, NULL AS name, NULL AS ov_text, NULL AS ov_start, NULL AS ov_end, NULL AS ov_position, NULL AS ov_style, NULL AS ov_sv WHERE false"
           : `SELECT a.id::text, a.label, a.name,
                 o.text AS ov_text, o.start_s::text AS ov_start,
                 o.end_s::text AS ov_end, o.position AS ov_position,
-                o.style AS ov_style
+                o.style AS ov_style, o.sv AS ov_sv
          FROM (SELECT id, label, name FROM clip_variants
                WHERE clip_id = $1 ORDER BY label LIMIT 1) a
          LEFT JOIN clip_overlays o ON o.variant_id = a.id
@@ -175,10 +176,10 @@ export async function GET(
   const [groupOverlays, groupCrops] = await Promise.all([
     q<{
       vid: string; id: string; text: string; start_s: string; end_s: string;
-      position: string; style: string;
+      position: string; style: string; sv: Record<string, unknown> | null;
     }>(
       `SELECT o.variant_id::text AS vid, o.id::text, o.text,
-              o.start_s::text, o.end_s::text, o.position, o.style
+              o.start_s::text, o.end_s::text, o.position, o.style, o.sv
        FROM clip_overlays o
        WHERE o.variant_id IN (SELECT id FROM clip_variants WHERE clip_id = $1)
        ORDER BY o.variant_id, o.idx`,
@@ -212,7 +213,7 @@ export async function GET(
     renderStale: boolean; ratios: string[];
     presetId: string | null; overrides: Record<string, unknown>;
     renderStatus: string | null; renderError: string | null;
-    overlays: { id: string; text: string; start: number; end: number; position: string; style: string }[];
+    overlays: { id: string; text: string; start: number; end: number; position: string; style: string; sv: Record<string, unknown> | null }[];
     crops: { sceneId: string; ratio: string; x: number; y: number; w: number; h: number }[];
     scenes: {
       id: string; idx: number; layout: string; in: number | null;
@@ -232,7 +233,7 @@ export async function GET(
               .map((o) => ({
                 id: o.id, text: o.text,
                 start: parseFloat(o.start_s), end: parseFloat(o.end_s),
-                position: o.position, style: o.style,
+                position: o.position, style: o.style, sv: o.sv,
               })),
             crops: groupCrops
               .filter((c) => c.vid === r.id)
@@ -304,7 +305,7 @@ export async function GET(
     overlays: overlays.map((o) => ({
       id: o.id, text: o.text,
       start: parseFloat(o.start_s), end: parseFloat(o.end_s),
-      position: o.position, style: o.style,
+      position: o.position, style: o.style, sv: o.sv,
     })),
     overlayStyles,
     renderStale: variant.render_stale,
@@ -325,6 +326,7 @@ export async function GET(
               end: parseFloat(r.ov_end!),
               position: r.ov_position!,
               style: r.ov_style!,
+              sv: r.ov_sv,
             })),
         }
       : null,

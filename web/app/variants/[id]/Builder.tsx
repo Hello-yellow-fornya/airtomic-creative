@@ -36,34 +36,56 @@ type Crop = { sceneId: string; ratio: string; x: number; y: number; w: number; h
 type Asset = { id: string; name: string; kind: string };
 type Preset = { id: string; name: string; is_default: boolean; config: Record<string, unknown> };
 type Word = { w: string; s: number; e: number };
+export type OvSv = {
+  fs: number; ol: number; vp: number; wpl: number | null;
+  color: string; bg: "none" | "pill" | "box"; bg_color: string;
+  bg_alpha: number; caps: boolean; weight: number;
+};
 type Ov = {
   id: string; text: string; start: number; end: number;
-  position: string; style: string;
+  position: string; style: string; sv: OvSv | null;
 };
 type OvStyle = { key: string; name: string; config: Record<string, unknown> };
 
-/** Mirror of worker/overlays.position_y — preview and burn must agree. */
+/** Mirror of worker/overlays.position_y — legacy rows without stored
+ * values position via the enum + ratio safe zones. */
 function ovY(position: string, ratio: string): number {
   const safe = SAFE[ratio] ?? { t: 8, b: 8, r: 0 };
   if (position === "top") return Math.min(safe.t / 100 + 0.06, 0.30);
   if (position === "center") return 0.5;
   return Math.max(0.70, 1 - safe.b / 100 - 0.08);
 }
-/** Mirror of worker/overlays.subtitle_shift_for (collision push-down). */
+/** Centre-line y (fraction): the overlay's stored vp wins. */
+function ovVp(o: Ov, ratio: string): number {
+  return o.sv ? Math.max(0, Math.min(1, o.sv.vp / 100)) : ovY(o.position, ratio);
+}
+/** Mirror of worker/overlays.subtitle_shift_for. Only overlays WITH a
+ * background push subtitles down — text over text is a design choice. */
 function subVpWithOverlays(
   t0: number, t1: number, ovs: Ov[], ratio: string, subVp: number,
+  hasBg: (o: Ov) => boolean,
 ): number {
   const safe = SAFE[ratio] ?? { t: 8, b: 8, r: 0 };
   const cap = 1 - safe.b / 100 + 0.04;
   let lowest: number | null = null;
   for (const o of ovs) {
     if (o.end <= t0 || o.start >= t1) continue;
-    const y = ovY(o.position, ratio);
+    if (!hasBg(o)) continue;
+    const y = ovVp(o, ratio);
     const band: [number, number] = [y - 0.05, y + 0.05];
     if (band[0] < subVp + 0.05 && band[1] > subVp - 0.05)
       if (lowest === null || band[1] > lowest) lowest = band[1];
   }
   return lowest === null ? subVp : Math.min(lowest + 0.07, cap);
+}
+/** words-per-line rewrap for overlays; null keeps manual breaks. */
+function wrapWpl(text: string, wpl: number | null): string {
+  if (!wpl) return text;
+  const words = text.replace(/\n/g, " ").split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  for (let i = 0; i < words.length; i += wpl)
+    lines.push(words.slice(i, i + wpl).join(" "));
+  return lines.join("\n");
 }
 
 const RATIOS: Record<string, { ar: number; label: string; px: string; use: string }> = {
@@ -90,7 +112,12 @@ const FRAME_CACHE = new Map<string, string[]>();
 type Style = {
   fs: number; ol: number; vp: number; wpl: number; hl: string;
   caps: boolean; box: boolean;
+  color: string; bg: "none" | "pill" | "box"; bgColor: string;
 };
+
+// Brand palette for the Text style panel swatches.
+const TEXT_COLORS = ["#FFFFFF", "#0A0B0D", "#FFC629", "#4ED6A1", "#FF6B8A"];
+const BG_COLORS = ["#0A0B0D", "#FFFFFF", "#FFC629", "#14403C"];
 
 function cropBox(srcAr: number, ratio: string) {
   const ar = RATIOS[ratio].ar;
@@ -107,6 +134,12 @@ const fmt = (t: number) => {
   const s = String(Math.floor(t % 60)).padStart(2, "0");
   const ms = String(Math.round((t % 1) * 1000)).padStart(3, "0");
   return `${h}:${m}:${s}.${ms}`;
+};
+/** Parse "hh:mm:ss.mmm", "mm:ss.s" or bare seconds. NaN when unusable. */
+const parseTs = (raw: string): number => {
+  const parts = raw.trim().split(":").map((x) => x.trim());
+  if (parts.some((x) => x === "" || Number.isNaN(Number(x)))) return NaN;
+  return parts.reduce((acc, x) => acc * 60 + Number(x), 0);
 };
 const mmss = (t: number) =>
   `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`;
@@ -165,10 +198,14 @@ export default function Builder({
     presets.find((p) => p.is_default) ?? presets[0];
   const seedStyle = (): Style => {
     const c = { ...(activePreset?.config ?? {}), ...variant.overrides } as Record<string, unknown>;
+    const bg = ["none", "pill", "box"].includes(String(c.bg))
+      ? (String(c.bg) as Style["bg"]) : (c.box ? "box" : "none");
     return {
       fs: Number(c.fs ?? 30), ol: Number(c.ol ?? 3), vp: Number(c.vp ?? 72),
       wpl: Number(c.wpl ?? 4), hl: String(c.hl ?? "#FFC629"),
-      caps: !!c.caps, box: !!c.box,
+      caps: !!c.caps, box: bg !== "none",
+      color: String(c.color ?? "#FFFFFF"), bg,
+      bgColor: String(c.bg_color ?? "#000000"),
     };
   };
   const [S, setS] = useState<Style>(seedStyle);
@@ -185,6 +222,10 @@ export default function Builder({
 
   // ----- text overlays (a layer above subtitles) -----
   const [ovs, setOvs] = useState<Ov[]>(overlays);
+  // which text layer the shared "Text style" panel edits
+  const [textTarget, setTextTarget] = useState<string>("subs");
+  const targetOv = textTarget === "subs" ? null
+    : ovs.find((o) => o.id === textTarget) ?? null;
   const [stale, setStale] = useState(renderStale);
   const [suggestFor, setSuggestFor] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<{ text: string; angle: string }[] | null>(null);
@@ -207,6 +248,7 @@ export default function Builder({
     setSuggestFor(null);
     setSuggestions(null);
     setNote(null);
+    setTextTarget("subs");
     pendingStyle.current = null;
     for (const t of Object.values(ovSaveTimers.current)) clearTimeout(t);
     ovSaveTimers.current = {};
@@ -218,6 +260,56 @@ export default function Builder({
   const styleCfg = useCallback(
     (key: string) => overlayStyles.find((s) => s.key === key)?.config ?? {},
     [overlayStyles]);
+  // background presence decides subtitle push-down (collision rule)
+  const ovHasBg = useCallback(
+    (o: Ov) => o.sv
+      ? o.sv.bg !== "none"
+      : !!(styleCfg(o.style) as { box?: boolean }).box,
+    [styleCfg]);
+
+  /** Effective resolved values for preview — stored sv, or the legacy
+   * preset mapped into the same shape. */
+  const ovResolved = useCallback((o: Ov): OvSv => {
+    if (o.sv) return o.sv;
+    const c = styleCfg(o.style) as {
+      fs?: number; weight?: number; color?: string; box?: boolean;
+      box_color?: string; box_alpha?: number; uppercase?: boolean;
+    };
+    return {
+      fs: c.fs ?? 40, ol: 0, vp: ovY(o.position, bRatio) * 100, wpl: null,
+      color: c.color ?? "#FFFFFF", bg: c.box ? "pill" : "none",
+      bg_color: c.box_color ?? "#0A0B0D", bg_alpha: c.box_alpha ?? 0.75,
+      caps: !!c.uppercase, weight: c.weight ?? 800,
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [styleCfg, bRatio]);
+
+  /** Style edit on an overlay: local state + debounced PATCH. Any manual
+   * edit marks the overlay Custom; presets set every value at once. */
+  function patchSv(o: Ov, patch: Partial<OvSv>, viaPreset = false) {
+    const sv: OvSv = { ...ovResolved(o), ...patch };
+    const style = viaPreset ? o.style : "custom";
+    patchOverlayLocal(o.id, { sv, ...(viaPreset ? {} : { style: "custom" }) });
+    patchOverlayDebounced(o.id, { sv, style });
+  }
+  function applyOvPreset(o: Ov, key: string) {
+    const c = styleCfg(key) as {
+      fs?: number; weight?: number; color?: string; box?: boolean;
+      box_color?: string; box_alpha?: number; uppercase?: boolean;
+      default_position?: string;
+    };
+    const pos = c.default_position ?? o.position;
+    const sv: OvSv = {
+      fs: c.fs ?? 40, ol: 0,
+      vp: pos === "top" ? 20 : pos === "center" ? 50 : 76,
+      wpl: null,
+      color: c.color ?? "#FFFFFF", bg: c.box ? "pill" : "none",
+      bg_color: c.box_color ?? "#0A0B0D", bg_alpha: c.box_alpha ?? 0.75,
+      caps: !!c.uppercase, weight: c.weight ?? 800,
+    };
+    patchOverlayLocal(o.id, { sv, style: key, position: pos });
+    patchOverlayDebounced(o.id, { sv, style: key, position: pos });
+  }
 
   async function addOverlay() {
     if (readOnly) { setNote("source removed — this variant is read-only"); return; }
@@ -231,7 +323,9 @@ export default function Builder({
       id: body.overlay.id, text: body.overlay.text,
       start: parseFloat(body.overlay.start_s), end: parseFloat(body.overlay.end_s),
       position: body.overlay.position, style: body.overlay.style,
+      sv: body.overlay.sv ?? null,
     }]);
+    setTextTarget(body.overlay.id);
     setStale(true);
   }
   function patchOverlayLocal(id: string, patch: Partial<Ov>) {
@@ -567,11 +661,12 @@ export default function Builder({
       if (mode === "move") {
         const len = orig.end - orig.start;
         start = Math.max(0, Math.min(Math.max(clipDur - len, 0), orig.start + dt));
+        start = Math.max(0, Math.min(Math.max(clipDur - len, 0), snapT(start, ev.altKey)));
         end = start + len;
       } else if (mode === "l") {
-        start = Math.max(0, Math.min(orig.start + dt, orig.end - 0.3));
+        start = Math.max(0, Math.min(snapT(orig.start + dt, ev.altKey), orig.end - 0.3));
       } else {
-        end = Math.min(clipDur, Math.max(orig.end + dt, orig.start + 0.3));
+        end = Math.min(clipDur, Math.max(snapT(orig.end + dt, ev.altKey), orig.start + 0.3));
       }
       last = { start, end };
       patchOverlayLocal(o.id, last);
@@ -665,6 +760,41 @@ export default function Builder({
       play();
     }
   }, [resumeAfterTrim, handleMode, play]);
+
+  // ----- overlay timing: scene boundaries on the output timeline -----
+  const sceneBounds = useMemo(() => {
+    const b = [0];
+    let acc = 0;
+    for (const s of scenes) { acc += sceneDur(s); b.push(acc); }
+    return b;
+  }, [scenes]);
+  /** Snap to the nearest scene boundary within 0.2s; Alt disables. */
+  const snapT = useCallback((v: number, alt?: boolean) => {
+    if (alt) return v;
+    let best = v;
+    let bestD = 0.2;
+    for (const b of sceneBounds) {
+      const d = Math.abs(b - v);
+      if (d < bestD) { bestD = d; best = b; }
+    }
+    return best;
+  }, [sceneBounds]);
+  function commitOvTiming(o: Ov, field: "start" | "end", raw: string, alt: boolean) {
+    let v = parseTs(raw);
+    if (!Number.isFinite(v)) return false;         // revert
+    v = snapT(v, alt);
+    if (field === "start") {
+      if (v >= o.end) return false;                // End must be after Start
+      v = Math.max(0, Math.min(v, o.end - 0.1));
+    } else {
+      if (v <= o.start) return false;
+      v = Math.min(clipDur, Math.max(v, o.start + 0.1));
+    }
+    const patch = field === "start" ? { start: v } : { end: v };
+    patchOverlayLocal(o.id, patch);
+    void patchOverlay(o.id, field === "start" ? { start_s: v } : { end_s: v });
+    return true;
+  }
 
   // ----- api helper -----
   const call = useCallback(async (url: string, method: string, body?: unknown) => {
@@ -780,7 +910,10 @@ export default function Builder({
     const next = { ...S, ...patch };
     setS(next);
     const ov = { ...styleOv };
-    for (const [k, v] of Object.entries(patch)) ov[k] = v;
+    for (const [k, v] of Object.entries(patch)) {
+      if (k === "box") continue;              // superseded by bg
+      ov[k === "bgColor" ? "bg_color" : k] = v;  // worker key names
+    }
     setStyleOv(ov);
     persistStyle(ov, fixes, presetId);
   }
@@ -788,10 +921,14 @@ export default function Builder({
     const c = p.config as Record<string, unknown>;
     setPresetId(p.id);
     setStyleOv({});
+    const bg = ["none", "pill", "box"].includes(String(c.bg))
+      ? (String(c.bg) as Style["bg"]) : (c.box ? "box" : "none");
     setS({
       fs: Number(c.fs ?? 30), ol: Number(c.ol ?? 3), vp: Number(c.vp ?? 72),
       wpl: Number(c.wpl ?? 4), hl: String(c.hl ?? "#FFC629"),
-      caps: !!c.caps, box: !!c.box,
+      caps: !!c.caps, box: bg !== "none",
+      color: String(c.color ?? "#FFFFFF"), bg,
+      bgColor: String(c.bg_color ?? "#000000"),
     });
     persistStyle({}, fixes, p.id);
   }
@@ -919,27 +1056,25 @@ export default function Builder({
                   onLoadedMetadata={(e) => { e.currentTarget.currentTime = IN + t; }} />
               )}
               {compare.overlays.filter((o) => t >= o.start && t < o.end).map((o) => {
-                const cfg = styleCfg(o.style) as {
-                  fs?: number; weight?: number; color?: string; box?: boolean;
-                  box_color?: string; box_alpha?: number; uppercase?: boolean;
-                };
+                const cfg = ovResolved(o);
                 return (
                   <div key={o.id} style={{
                     position: "absolute", left: "50%",
-                    top: `${ovY(o.position, bRatio) * 100}%`,
+                    top: `${ovVp(o, bRatio) * 100}%`,
                     transform: "translate(-50%,-50%)", zIndex: 6,
                     maxWidth: "86%", textAlign: "center",
                     fontFamily: "'Plus Jakarta Sans','Inter',sans-serif",
-                    fontWeight: cfg.weight ?? 700,
-                    fontSize: (cfg.fs ?? 40) * 0.4,
+                    fontWeight: cfg.weight,
+                    fontSize: cfg.fs * 0.4,
                     lineHeight: 1.15, whiteSpace: "pre-wrap",
-                    color: cfg.color ?? "#fff",
-                    ...(cfg.box ? {
-                      background: `${cfg.box_color ?? "#0A0B0D"}${Math.round((cfg.box_alpha ?? 0.75) * 255).toString(16).padStart(2, "0")}`,
-                      padding: "3px 8px", borderRadius: 5,
+                    color: cfg.color,
+                    ...(cfg.bg !== "none" ? {
+                      background: `${cfg.bg_color}${Math.round(cfg.bg_alpha * 255).toString(16).padStart(2, "0")}`,
+                      padding: "3px 8px",
+                      borderRadius: cfg.bg === "pill" ? 999 : 5,
                     } : {}),
                   }}>
-                    {cfg.uppercase ? o.text.toUpperCase() : o.text}
+                    {wrapWpl(cfg.caps ? o.text.toUpperCase() : o.text, cfg.wpl)}
                   </div>
                 );
               })}
@@ -980,22 +1115,27 @@ export default function Builder({
 
             {/* live captions — pushed down when an overlay occupies their band */}
             {line && scene?.layout !== "card" && (
-              <div className="cap" style={{
+              <div className="cap" role="button" tabIndex={0}
+                onClick={() => setTextTarget("subs")}
+                style={{
                 fontFamily: "var(--font-inter),sans-serif", fontWeight: 700,
-                lineHeight: 1.22, fontSize: capFont, color: "#fff",
-                letterSpacing: "-.01em",
-                top: `${subVpWithOverlays(t, t + 0.4, ovs, bRatio, S.vp / 100) * 100}%`,
+                lineHeight: 1.22, fontSize: capFont, color: S.color,
+                letterSpacing: "-.01em", cursor: "pointer",
+                outline: textTarget === "subs" ? "1px dashed rgba(255,255,255,.45)" : "none",
+                outlineOffset: 3,
+                top: `${subVpWithOverlays(t, t + 0.4, ovs, bRatio, S.vp / 100, ovHasBg) * 100}%`,
                 transform: "translateY(-50%)",
                 textShadow: S.ol
                   ? `0 0 ${S.ol}px #000,0 0 ${S.ol}px #000,0 ${S.ol / 2}px ${S.ol}px rgba(0,0,0,.6)`
                   : "none",
-                ...(S.box
-                  ? { background: "rgba(0,0,0,.62)", padding: "5px 9px", borderRadius: 3 }
+                ...(S.bg !== "none"
+                  ? { background: `${S.bgColor}9E`, padding: "5px 9px",
+                      borderRadius: S.bg === "pill" ? 999 : 3 }
                   : {}),
               }}>
                 <div>
                   {line.map((w, i) => (
-                    <b key={i} style={{ color: tSrc >= w.s && tSrc < w.e ? S.hl : "#fff" }}>
+                    <b key={i} style={{ color: tSrc >= w.s && tSrc < w.e ? S.hl : S.color }}>
                       {S.caps ? fixWord(w.w).toUpperCase() : fixWord(w.w)}{" "}
                     </b>
                   ))}
@@ -1007,27 +1147,33 @@ export default function Builder({
                 fs is design px at 1080 output width; the stage is ~520px,
                 same calibration the caption preview uses. */}
             {ovs.filter((o) => t >= o.start && t < o.end).map((o) => {
-              const cfg = styleCfg(o.style) as {
-                fs?: number; weight?: number; color?: string; box?: boolean;
-                box_color?: string; box_alpha?: number; uppercase?: boolean;
-              };
+              const cfg = ovResolved(o);
+              const text = wrapWpl(cfg.caps ? o.text.toUpperCase() : o.text, cfg.wpl);
               return (
-                <div key={o.id} style={{
-                  position: "absolute", left: "50%",
-                  top: `${ovY(o.position, bRatio) * 100}%`,
-                  transform: "translate(-50%,-50%)", zIndex: 6,
-                  maxWidth: "86%", textAlign: "center",
-                  fontFamily: "'Plus Jakarta Sans','Inter',sans-serif",
-                  fontWeight: cfg.weight ?? 700,
-                  fontSize: (cfg.fs ?? 40) * 0.48,
-                  lineHeight: 1.15, whiteSpace: "pre-wrap",
-                  color: cfg.color ?? "#fff",
-                  ...(cfg.box ? {
-                    background: `${cfg.box_color ?? "#0A0B0D"}${Math.round((cfg.box_alpha ?? 0.75) * 255).toString(16).padStart(2, "0")}`,
-                    padding: "4px 10px", borderRadius: 6,
-                  } : {}),
-                }}>
-                  {cfg.uppercase ? o.text.toUpperCase() : o.text}
+                <div key={o.id} role="button" tabIndex={0}
+                  title="Click to edit this overlay's text style"
+                  onClick={(e) => { e.stopPropagation(); setTextTarget(o.id); }}
+                  style={{
+                    position: "absolute", left: "50%",
+                    top: `${ovVp(o, bRatio) * 100}%`,
+                    transform: "translate(-50%,-50%)", zIndex: 6,
+                    maxWidth: "86%", textAlign: "center", cursor: "pointer",
+                    fontFamily: "'Plus Jakarta Sans','Inter',sans-serif",
+                    fontWeight: cfg.weight,
+                    fontSize: cfg.fs * 0.48,
+                    lineHeight: 1.15, whiteSpace: "pre-wrap",
+                    color: cfg.color,
+                    textShadow: cfg.bg === "none" && cfg.ol
+                      ? `0 0 ${cfg.ol}px #000,0 0 ${cfg.ol}px #000` : undefined,
+                    outline: textTarget === o.id ? "1px dashed rgba(255,255,255,.7)" : "none",
+                    outlineOffset: 3,
+                    ...(cfg.bg !== "none" ? {
+                      background: `${cfg.bg_color}${Math.round(cfg.bg_alpha * 255).toString(16).padStart(2, "0")}`,
+                      padding: "4px 10px",
+                      borderRadius: cfg.bg === "pill" ? 999 : 6,
+                    } : {}),
+                  }}>
+                  {text}
                 </div>
               );
             })}
@@ -1312,7 +1458,7 @@ export default function Builder({
         <Acc title="Overlays" sum={ovs.length ? `${ovs.length} on variant` : "none"} defaultOpen>
           {stale && (
             <div className="ov-stale">
-              Overlays changed since the last render — the export is stale.
+              Changed since the last render — the export is stale.
               <button className="btn sm" disabled={busy}
                 onClick={() => void call(`/api/variants/${variant.id}/render`, "POST", { ratio: bRatio })
                   .then(() => { setStale(false); setNote(`re-render queued (${RATIOS[bRatio].label})`); })}>
@@ -1320,46 +1466,39 @@ export default function Builder({
               </button>
             </div>
           )}
-          {ovs.map((o) => (
-            <div key={o.id} className="ovrow">
+          {ovs.map((o, oi) => (
+            <div key={o.id}
+              className={`ovrow${textTarget === o.id ? " sel" : ""}`}
+              onClick={() => setTextTarget(o.id)}>
               <textarea rows={2} value={o.text}
+                onFocus={() => setTextTarget(o.id)}
                 onChange={(e) => {
                   patchOverlayLocal(o.id, { text: e.target.value });
                   patchOverlayDebounced(o.id, { text: e.target.value });
                 }} />
               <div className="ovmeta">
-                <select value={o.style} title="Style preset"
-                  onChange={(e) => {
-                    patchOverlayLocal(o.id, { style: e.target.value });
-                    const cfg = styleCfg(e.target.value) as { default_position?: string };
-                    if (cfg.default_position) patchOverlayLocal(o.id, { position: cfg.default_position });
-                    void patchOverlay(o.id, {
-                      style: e.target.value,
-                      ...(cfg.default_position ? { position: cfg.default_position } : {}),
-                    });
-                  }}>
-                  {overlayStyles.map((s) => <option key={s.key} value={s.key}>{s.name}</option>)}
-                </select>
-                <select value={o.position} title="Position"
-                  onChange={(e) => {
-                    patchOverlayLocal(o.id, { position: e.target.value });
-                    void patchOverlay(o.id, { position: e.target.value });
-                  }}>
-                  <option value="top">Top</option>
-                  <option value="center">Centre</option>
-                  <option value="lower_third">Lower third</option>
-                </select>
+                <span className="mono ovlbl">Overlay {oi + 1}</span>
+                <TimingField label="Start" value={o.start}
+                  onFocusSeek={() => seek(o.start)}
+                  onCommit={(raw, alt) => commitOvTiming(o, "start", raw, alt)} />
+                <span className="mono ovdash">–</span>
+                <TimingField label="End" value={o.end}
+                  onFocusSeek={() => seek(o.end)}
+                  onCommit={(raw, alt) => commitOvTiming(o, "end", raw, alt)} />
                 <span className="mono" style={{ fontSize: 10, color: "var(--muted)" }}>
-                  {o.start.toFixed(1)}–{o.end.toFixed(1)}s
+                  {(o.end - o.start).toFixed(1)}s
                 </span>
                 <span style={{ flex: 1 }} />
                 <button className="btn ghost sm" disabled={suggesting}
-                  title="Three hook options from Claude, using this range's transcript and the video's creative tags"
+                  title="Three hook options from Claude — accepting one replaces the TEXT only; your style and timing stay put"
                   onClick={() => void suggestHook(o)}>
                   {suggesting && suggestFor === o.id ? "…" : "Suggest hook"}
                 </button>
                 <button className="btn ghost sm" aria-label="Delete overlay"
-                  onClick={() => void delOverlay(o.id)}>✕</button>
+                  onClick={() => {
+                    if (textTarget === o.id) setTextTarget("subs");
+                    void delOverlay(o.id);
+                  }}>✕</button>
               </div>
               {suggestFor === o.id && suggestions && (
                 <div className="ovsug">
@@ -1379,64 +1518,205 @@ export default function Builder({
             </div>
           ))}
           <button className="btn sm" onClick={() => void addOverlay()}>
-            + Overlay (first 3s)
+            + Overlay
           </button>
           <p style={{ fontSize: 10.5, color: "var(--muted)", margin: "6px 0 0" }}>
-            Drag the bar on the filmstrip to move it; drag its edges to
-            change the range. Overlays burn above subtitles and push them
-            out of the way when they collide.
+            New overlays start on the first 3s. Drag the bar on the filmstrip
+            or edit Start/End — edges snap to scene boundaries within 0.2s
+            (hold Alt to disable). Style lives in the Text style panel below.
           </p>
         </Acc>
 
-        <Acc title="Subtitles" sum={`${activePresetName} · ${S.fs}px`} defaultOpen>
-          <div className="presets">
-            {presets.map((p) => (
-              <button key={p.id} className="chip"
-                data-on={presetId === p.id && !Object.keys(styleOv).length ? "1" : undefined}
-                onClick={() => applyPreset(p)}>
-                {p.name}
-              </button>
-            ))}
-          </div>
-          <div className="ctrl">
-            <label htmlFor="fs">Size <b>{S.fs}px</b></label>
-            <input id="fs" type="range" min={16} max={46} value={S.fs}
-              onChange={(e) => setStyle({ fs: +e.target.value })} />
-          </div>
-          <div className="ctrl">
-            <label htmlFor="ol">Outline <b>{S.ol}px</b></label>
-            <input id="ol" type="range" min={0} max={8} value={S.ol}
-              onChange={(e) => setStyle({ ol: +e.target.value })} />
-          </div>
-          <div className="ctrl">
-            <label htmlFor="vp">Vertical position <b>{S.vp}%</b></label>
-            <input id="vp" type="range" min={35} max={88} value={S.vp}
-              onChange={(e) => setStyle({ vp: +e.target.value })} />
-          </div>
-          <div className="ctrl">
-            <label htmlFor="wpl">Words per line <b>{S.wpl}</b></label>
-            <input id="wpl" type="range" min={2} max={8} value={S.wpl}
-              onChange={(e) => setStyle({ wpl: +e.target.value })} />
-          </div>
-          <div className="ctrl">
-            <label>Active word</label>
-            <div className="swatches">
-              {["#FFC629", "#4ED6A1", "#FF6B8A", "#FFFFFF"].map((c) => (
-                <button key={c} className="sw" style={{ background: c }}
-                  data-on={S.hl === c ? "1" : undefined}
-                  aria-label={`Highlight ${c}`}
-                  onClick={() => setStyle({ hl: c })} />
-              ))}
-            </div>
-          </div>
-          <label className="toggle">
-            <input type="checkbox" checked={S.caps} onChange={(e) => setStyle({ caps: e.target.checked })} />
-            All caps
-          </label>
-          <label className="toggle">
-            <input type="checkbox" checked={S.box} onChange={(e) => setStyle({ box: e.target.checked })} />
-            Background box
-          </label>
+        <Acc title={`Text style — ${targetOv ? `Overlay ${ovs.findIndex((o) => o.id === targetOv.id) + 1}` : "Subtitles"}`}
+          sum={targetOv
+            ? `${targetOv.style === "custom" ? "Custom" : (overlayStyles.find((x) => x.key === targetOv.style)?.name ?? targetOv.style)} · ${ovResolved(targetOv).fs}px`
+            : `${activePresetName} · ${S.fs}px`}
+          defaultOpen>
+          {targetOv ? (() => {
+            const tv = ovResolved(targetOv);
+            return (
+              <>
+                <div className="presets">
+                  {overlayStyles.map((p) => (
+                    <button key={p.key} className="chip"
+                      data-on={targetOv.style === p.key ? "1" : undefined}
+                      onClick={() => applyOvPreset(targetOv, p.key)}>
+                      {p.name}
+                    </button>
+                  ))}
+                  {targetOv.style === "custom" && (
+                    <span className="chip" data-on="1" style={{ cursor: "default" }}>Custom</span>
+                  )}
+                  <span style={{ flex: 1 }} />
+                  <button className="chip" title="Edit the subtitle track's style instead"
+                    onClick={() => setTextTarget("subs")}>
+                    ← Subtitles
+                  </button>
+                </div>
+                <div className="ctrl">
+                  <label>Position</label>
+                  <select value={targetOv.position}
+                    onChange={(e) => {
+                      const pos = e.target.value;
+                      const vp = pos === "top" ? 20 : pos === "center" ? 50 : 76;
+                      patchOverlayLocal(targetOv.id, { position: pos });
+                      patchOverlayDebounced(targetOv.id, { position: pos });
+                      patchSv(targetOv, { vp });
+                    }}>
+                    <option value="top">Top</option>
+                    <option value="center">Centre</option>
+                    <option value="lower_third">Lower third</option>
+                  </select>
+                </div>
+                <div className="ctrl">
+                  <label htmlFor="ovfs">Size <b>{Math.round(tv.fs)}px</b></label>
+                  <input id="ovfs" type="range" min={20} max={90} value={tv.fs}
+                    onChange={(e) => patchSv(targetOv, { fs: +e.target.value })} />
+                </div>
+                <div className="ctrl">
+                  <label htmlFor="ovol">Outline <b>{tv.ol}px</b></label>
+                  <input id="ovol" type="range" min={0} max={8} value={tv.ol}
+                    onChange={(e) => patchSv(targetOv, { ol: +e.target.value })} />
+                </div>
+                <div className="ctrl">
+                  <label htmlFor="ovvp">Vertical position <b>{Math.round(tv.vp)}%</b></label>
+                  <input id="ovvp" type="range" min={5} max={95} value={tv.vp}
+                    onChange={(e) => patchSv(targetOv, { vp: +e.target.value })} />
+                </div>
+                <div className="ctrl">
+                  <label htmlFor="ovwpl">Words per line <b>{tv.wpl ?? "manual"}</b></label>
+                  <input id="ovwpl" type="range" min={0} max={8} value={tv.wpl ?? 0}
+                    title="0 keeps your manual line breaks"
+                    onChange={(e) => patchSv(targetOv, { wpl: +e.target.value || null })} />
+                </div>
+                <div className="ctrl">
+                  <label>Background</label>
+                  <div className="presets" style={{ margin: 0 }}>
+                    {(["none", "pill", "box"] as const).map((bgv) => (
+                      <button key={bgv} className="chip" data-on={tv.bg === bgv ? "1" : undefined}
+                        onClick={() => patchSv(targetOv, { bg: bgv })}>
+                        {bgv}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="ctrl">
+                  <label>Text colour</label>
+                  <div className="swatches">
+                    {TEXT_COLORS.map((c) => (
+                      <button key={c} className="sw" style={{ background: c }}
+                        data-on={tv.color.toUpperCase() === c ? "1" : undefined}
+                        aria-label={`Text ${c}`}
+                        onClick={() => patchSv(targetOv, { color: c })} />
+                    ))}
+                  </div>
+                </div>
+                {tv.bg !== "none" && (
+                  <div className="ctrl">
+                    <label>Background colour</label>
+                    <div className="swatches">
+                      {BG_COLORS.map((c) => (
+                        <button key={c} className="sw" style={{ background: c }}
+                          data-on={tv.bg_color.toUpperCase() === c.toUpperCase() ? "1" : undefined}
+                          aria-label={`Background ${c}`}
+                          onClick={() => patchSv(targetOv, { bg_color: c, bg_alpha: 1 })} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <label className="toggle">
+                  <input type="checkbox" checked={tv.caps}
+                    onChange={(e) => patchSv(targetOv, { caps: e.target.checked })} />
+                  All caps
+                </label>
+              </>
+            );
+          })() : (
+            <>
+              <div className="presets">
+                {presets.map((p) => (
+                  <button key={p.id} className="chip"
+                    data-on={presetId === p.id && !Object.keys(styleOv).length ? "1" : undefined}
+                    onClick={() => applyPreset(p)}>
+                    {p.name}
+                  </button>
+                ))}
+                {Object.keys(styleOv).length > 0 && (
+                  <span className="chip" data-on="1" style={{ cursor: "default" }}>Custom</span>
+                )}
+              </div>
+              <div className="ctrl">
+                <label htmlFor="fs">Size <b>{S.fs}px</b></label>
+                <input id="fs" type="range" min={16} max={46} value={S.fs}
+                  onChange={(e) => setStyle({ fs: +e.target.value })} />
+              </div>
+              <div className="ctrl">
+                <label htmlFor="ol">Outline <b>{S.ol}px</b></label>
+                <input id="ol" type="range" min={0} max={8} value={S.ol}
+                  onChange={(e) => setStyle({ ol: +e.target.value })} />
+              </div>
+              <div className="ctrl">
+                <label htmlFor="vp">Vertical position <b>{S.vp}%</b></label>
+                <input id="vp" type="range" min={35} max={88} value={S.vp}
+                  onChange={(e) => setStyle({ vp: +e.target.value })} />
+              </div>
+              <div className="ctrl">
+                <label htmlFor="wpl">Words per line <b>{S.wpl}</b></label>
+                <input id="wpl" type="range" min={2} max={8} value={S.wpl}
+                  onChange={(e) => setStyle({ wpl: +e.target.value })} />
+              </div>
+              <div className="ctrl">
+                <label>Background</label>
+                <div className="presets" style={{ margin: 0 }}>
+                  {(["none", "pill", "box"] as const).map((bgv) => (
+                    <button key={bgv} className="chip" data-on={S.bg === bgv ? "1" : undefined}
+                      onClick={() => setStyle({ bg: bgv, box: bgv !== "none" })}>
+                      {bgv}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="ctrl">
+                <label>Text colour</label>
+                <div className="swatches">
+                  {TEXT_COLORS.map((c) => (
+                    <button key={c} className="sw" style={{ background: c }}
+                      data-on={S.color.toUpperCase() === c ? "1" : undefined}
+                      aria-label={`Text ${c}`}
+                      onClick={() => setStyle({ color: c })} />
+                  ))}
+                </div>
+              </div>
+              {S.bg !== "none" && (
+                <div className="ctrl">
+                  <label>Background colour</label>
+                  <div className="swatches">
+                    {BG_COLORS.map((c) => (
+                      <button key={c} className="sw" style={{ background: c }}
+                        data-on={S.bgColor.toUpperCase() === c.toUpperCase() ? "1" : undefined}
+                        aria-label={`Background ${c}`}
+                        onClick={() => setStyle({ bgColor: c })} />
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="ctrl">
+                <label>Active word</label>
+                <div className="swatches">
+                  {["#FFC629", "#4ED6A1", "#FF6B8A", "#FFFFFF"].map((c) => (
+                    <button key={c} className="sw" style={{ background: c }}
+                      data-on={S.hl === c ? "1" : undefined}
+                      aria-label={`Highlight ${c}`}
+                      onClick={() => setStyle({ hl: c })} />
+                  ))}
+                </div>
+              </div>
+              <label className="toggle">
+                <input type="checkbox" checked={S.caps} onChange={(e) => setStyle({ caps: e.target.checked })} />
+                All caps
+              </label>
+            </>
+          )}
         </Acc>
 
         <Acc title="Transcript fix">
@@ -1470,6 +1750,55 @@ export default function Builder({
         )}
       </div>
     </div>
+  );
+}
+
+/** Editable timecode field (same format as the clip's In/Out). Enter or
+ * blur commits; Esc reverts; Alt+Enter commits without scene-boundary
+ * snapping. Focusing scrubs the player so you see what the text lands on. */
+function TimingField({ label, value, onFocusSeek, onCommit }: {
+  label: string; value: number;
+  onFocusSeek?: () => void;
+  onCommit: (raw: string, alt: boolean) => boolean;
+}) {
+  const [txt, setTxt] = useState(fmt(value));
+  const [focused, setFocused] = useState(false);
+  const [bad, setBad] = useState(false);
+  const skipBlur = useRef(false);
+  useEffect(() => {
+    if (!focused) { setTxt(fmt(value)); setBad(false); }
+  }, [value, focused]);
+  return (
+    <input className={`mono ovtime${bad ? " bad" : ""}`} type="text"
+      value={txt} title={label} aria-label={label} spellCheck={false}
+      onFocus={() => { setFocused(true); onFocusSeek?.(); }}
+      onChange={(e) => { setTxt(e.target.value); setBad(false); }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          const ok = onCommit(txt, e.altKey);
+          setBad(!ok);
+          if (ok) { skipBlur.current = true; (e.target as HTMLInputElement).blur(); }
+        }
+        if (e.key === "Escape") {
+          setTxt(fmt(value)); setBad(false);
+          skipBlur.current = true;
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+      onBlur={() => {
+        setFocused(false);
+        if (skipBlur.current) { skipBlur.current = false; setBad(false); return; }
+        const parsed = parseTs(txt);
+        if (Number.isFinite(parsed) && Math.abs(parsed - value) < 0.0005) {
+          setTxt(fmt(value)); setBad(false); return;
+        }
+        if (txt !== fmt(value)) {
+          const ok = onCommit(txt, false);
+          setBad(!ok);
+          if (!ok) setTxt(fmt(value));
+        }
+      }} />
   );
 }
 

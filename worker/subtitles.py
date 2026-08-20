@@ -70,6 +70,9 @@ def _srt_ts(seconds: float) -> str:
 DEFAULT_PRESET = {
     "font": "Inter", "fs": 30, "ol": 3, "vp": 72,
     "wpl": 4, "hl": "#FFC629", "caps": False, "box": False,
+    # Text-style panel additions (0017): base text colour and background.
+    # "bg" supersedes the legacy box boolean: none | pill | box.
+    "color": "#FFFFFF", "bg": None, "bg_color": "#000000", "bg_alpha": 0.62,
 }
 
 
@@ -94,13 +97,18 @@ def build_ass(
     fontsize = max(1, round(float(cfg["fs"]) * 2.2 * play_w / 1080))
     outline = round(float(cfg["ol"]) * play_w / 1080)
     hl = _ass_colour(cfg["hl"])
+    base = _ass_colour(str(cfg.get("color") or "#FFFFFF"))
+    bg = cfg.get("bg") or ("box" if cfg.get("box") else "none")
     x = play_w // 2
     y = round(play_h * float(cfg["vp"]) / 100)
 
-    if cfg.get("box"):
+    if bg in ("pill", "box"):
         border_style, outline_val = 3, max(outline, 2)  # 3 = opaque box
+        back = _ass_colour(str(cfg.get("bg_color") or "#000000"),
+                           float(cfg.get("bg_alpha", 0.62)))
     else:
         border_style, outline_val = 1, outline          # 1 = outline + shadow
+        back = "&H9E000000&"
 
     # output_words() appends per scene in word-list order, so a word that
     # spans a scene boundary can arrive out of sequence — sort by output
@@ -121,7 +129,7 @@ def build_ass(
                 if cfg.get("caps"):
                     text = text.upper()
                 if j == i:
-                    parts.append(f"{{\\1c{hl}}}{text}{{\\1c&H00FFFFFF&}}")
+                    parts.append(f"{{\\1c{hl}}}{text}{{\\1c{base}}}")
                 else:
                     parts.append(text)
             ev_y = round(play_h * vp_for(start, end)) if vp_for else y
@@ -131,8 +139,8 @@ def build_ass(
             )
 
     style = (
-        f"Style: Caption,{cfg['font']},{fontsize},&H00FFFFFF,&H00FFFFFF,"
-        f"&H00000000,&H9E000000,-1,0,0,0,100,100,0,0,"
+        f"Style: Caption,{cfg['font']},{fontsize},{base},{base},"
+        f"&H00000000,{back},-1,0,0,0,100,100,0,0,"
         f"{border_style},{outline_val},0,5,0,0,0,1"
     )
 
@@ -165,11 +173,12 @@ def _ts(seconds: float) -> str:
     return f"{h}:{m:02d}:{s:05.2f}"
 
 
-def _ass_colour(hex_colour: str) -> str:
+def _ass_colour(hex_colour: str, alpha: float = 1.0) -> str:
     """#RRGGBB -> ASS &HAABBGGRR& (alpha 00 = opaque)."""
     hex_colour = hex_colour.lstrip("#")
     r, g, b = hex_colour[0:2], hex_colour[2:4], hex_colour[4:6]
-    return f"&H00{b}{g}{r}&".upper()
+    a = round((1 - max(0.0, min(1.0, alpha))) * 255)
+    return f"&H{a:02X}{b}{g}{r}&".upper()
 
 
 def _ass_escape(text: str) -> str:

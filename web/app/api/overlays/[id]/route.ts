@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
 import { UUID_RE } from "@/lib/worker";
-import { markStale } from "@/lib/overlays";
+import { markStale, sanitizeSv } from "@/lib/overlays";
 
 export const dynamic = "force-dynamic";
 
@@ -29,11 +29,20 @@ export async function PATCH(
     set("end_s", +body.end_s);
   if (POSITIONS.has(body.position)) set("position", body.position);
   if (typeof body.style === "string") {
-    const ok = await pool.query(
-      "SELECT 1 FROM overlay_style_presets WHERE key = $1", [body.style]);
-    if (!ok.rowCount)
-      return NextResponse.json({ error: `unknown style '${body.style}'` }, { status: 400 });
+    // 'custom' marks a hand-tuned overlay; anything else must be a preset
+    if (body.style !== "custom") {
+      const ok = await pool.query(
+        "SELECT 1 FROM overlay_style_presets WHERE key = $1", [body.style]);
+      if (!ok.rowCount)
+        return NextResponse.json({ error: `unknown style '${body.style}'` }, { status: 400 });
+    }
     set("style", body.style);
+  }
+  if (body.sv !== undefined) {
+    const sv = sanitizeSv(body.sv);
+    if (!sv)
+      return NextResponse.json({ error: "bad sv" }, { status: 400 });
+    set("sv", JSON.stringify(sv));
   }
   if (!sets.length)
     return NextResponse.json({ error: "nothing to update" }, { status: 400 });
