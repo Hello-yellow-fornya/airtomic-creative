@@ -283,6 +283,7 @@ def _silence(dur: float, label: str) -> str:
 def _build_command(
     scenes, crops, assets, src_path: str, src_ar: float,
     target_w: int, target_h: int, ass_path: str, out_path: str,
+    overlay_ass_path: str | None = None,
 ) -> list[str]:
     # Inputs: [0] source, then one per asset (stills looped to fill duration).
     inputs: list[str] = ["-i", src_path]
