@@ -26,8 +26,10 @@ export async function PATCH(
 
 /** Delete a source: remove the video row (transcripts / scenes / tags /
  * candidates cascade) and clean its source, keyframes and audio out of R2
- * via the worker's cleanup job. Refuses when clips still reference it —
- * delete those first (or merge). Failed ingests always qualify. */
+ * via the worker's cleanup job. Clips that reference it survive as
+ * ORPHANS (video_id -> NULL, 0016): their variants stay listed in the
+ * builder read-only, exports remain downloadable, and they can still be
+ * deleted. */
 export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -47,15 +49,8 @@ export async function DELETE(
       await client.query("ROLLBACK");
       return NextResponse.json({ error: "not found" }, { status: 404 });
     }
-    const clips = await client.query(
+    const orphans = await client.query(
       "SELECT count(*)::int AS n FROM clips WHERE video_id = $1", [id]);
-    if (clips.rows[0].n > 0) {
-      await client.query("ROLLBACK");
-      return NextResponse.json(
-        { error: `${clips.rows[0].n} clip(s) still reference this source — delete them first` },
-        { status: 409 },
-      );
-    }
     await client.query("DELETE FROM videos WHERE id = $1", [id]);
     await client.query(
       `INSERT INTO jobs (type, payload)
@@ -64,7 +59,7 @@ export async function DELETE(
       [`sources/${id}/`, `keyframes/${id}/`, `audio/${id}.wav`],
     );
     await client.query("COMMIT");
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, orphaned_clips: orphans.rows[0].n });
   } catch (e) {
     await client.query("ROLLBACK");
     return NextResponse.json(

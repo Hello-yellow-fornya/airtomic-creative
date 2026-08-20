@@ -110,8 +110,9 @@ export default function LibraryBrowser({
     if (!sel.size) return;
     if (!window.confirm(
       `Delete ${sel.size} source${sel.size > 1 ? "s" : ""}?\n\nRemoves the videos, their ` +
-      "transcripts, scenes and tags, and their files in R2. Sources still " +
-      "referenced by clips are skipped with an error.")) return;
+      "transcripts, scenes and tags, and their files in R2. Clips built " +
+      "from them survive as read-only orphans — their exports stay " +
+      "downloadable in the builder.")) return;
     setBusy(true);
     const errs: string[] = [];
     for (const id of sel) {

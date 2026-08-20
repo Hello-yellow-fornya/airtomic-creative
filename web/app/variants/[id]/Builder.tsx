@@ -19,8 +19,10 @@ type VariantInfo = {
   id: string; label: string; name: string; status: string;
   clipId: string; clipIn: number; clipOut: number;
   presetId: string | null; overrides: Record<string, unknown>;
-  videoId: string; videoTitle?: string | null;
+  videoId: string | null; videoTitle?: string | null;
   videoDuration: number; srcW: number; srcH: number;
+  renderStatus?: string | null; renderError?: string | null;
+  ratios?: string[];
 };
 export type ComparePayload = {
   id: string; label: string; name: string; overlays: Ov[];
@@ -110,22 +112,31 @@ const clock = (t: number) =>
 export default function Builder({
   variant, scenes, crops, assets, presets, words, workerUp,
   overlays, overlayStyles, renderStale,
-  compare = null, compareOn = false,
-  onJumpToRename, registerFlush, onDataChanged,
+  compare = null, compareOn = false, onCompareToggle,
+  onJumpToRename, registerFlush, registerApi, onDataChanged,
+  selScene, onSelectScene, scenesSlot, readOnly = false,
 }: {
   variant: VariantInfo; scenes: Scene[]; crops: Crop[];
   assets: Asset[]; presets: Preset[]; words: Word[]; workerUp: boolean;
   overlays: Ov[]; overlayStyles: OvStyle[]; renderStale: boolean;
   compare?: ComparePayload | null; compareOn?: boolean;
+  onCompareToggle?: () => void;
   onJumpToRename?: () => void;
   registerFlush?: (fn: () => Promise<void>) => void;
+  registerApi?: (api: { getPlayheadS: () => number }) => void;
   onDataChanged?: () => void;
+  selScene: number;
+  onSelectScene: (i: number) => void;
+  scenesSlot?: React.ReactNode;
+  readOnly?: boolean;
 }) {
   const router = useRouter();
   const srcAr = variant.srcW / Math.max(variant.srcH, 1);
   const draft = variant.status === "draft";
 
-  const [sel, setSel] = useState(0);
+  // Scene selection is controlled by the workbench: the variant-row scene
+  // cards choose which scene the crop/layout tools target.
+  const sel = selScene;
   const scene = scenes[Math.min(sel, Math.max(scenes.length - 1, 0))] as Scene | undefined;
 
   const [bRatio, setBRatio] = useState("9x16");
@@ -181,6 +192,7 @@ export default function Builder({
     [overlayStyles]);
 
   async function addOverlay() {
+    if (readOnly) { setNote("source removed — this variant is read-only"); return; }
     const res = await fetch(`/api/variants/${variant.id}/overlays`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: "New overlay", start_s: 0, end_s: Math.min(3, clipDur) }),
@@ -198,6 +210,7 @@ export default function Builder({
     setOvs((o) => o.map((x) => (x.id === id ? { ...x, ...patch } : x)));
   }
   async function patchOverlay(id: string, patch: Record<string, unknown>) {
+    if (readOnly) return;
     const res = await fetch(`/api/overlays/${id}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
@@ -396,7 +409,7 @@ export default function Builder({
   } | null>(null);
 
   function onCropDown(e: React.PointerEvent) {
-    if (!scene || scene.layout === "card") return;
+    if (readOnly || !scene || scene.layout === "card") return;
     e.preventDefault();
     try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
     dragRef.current = {
@@ -430,7 +443,7 @@ export default function Builder({
     window.addEventListener("pointercancel", onUp);
   }
   function onCropKey(e: React.KeyboardEvent) {
-    if (!scene || scene.layout === "card") return;
+    if (readOnly || !scene || scene.layout === "card") return;
     const step = (e.shiftKey ? 5 : 1) / 100;
     let next: { x: number; y: number } | null = null;
     if (box.axis === "x") {
@@ -505,6 +518,7 @@ export default function Builder({
    * grips resize it. Live-scrubs the moving boundary like the trim
    * handles; persists once on release. */
   function onOvBarDown(e: React.PointerEvent, o: Ov) {
+    if (readOnly) return;
     e.preventDefault();
     e.stopPropagation();
     const target = e.target as Element;
@@ -547,6 +561,7 @@ export default function Builder({
 
   function onHandleDown(mode: "l" | "r") {
     return (e: React.PointerEvent) => {
+      if (readOnly) return;
       e.preventDefault();
       e.stopPropagation();
       try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
@@ -622,6 +637,7 @@ export default function Builder({
 
   // ----- api helper -----
   const call = useCallback(async (url: string, method: string, body?: unknown) => {
+    if (readOnly) { setNote("source removed — this variant is read-only"); return null; }
     setBusy(true);
     setNote(null);
     const res = await fetch(url, {
@@ -655,6 +671,7 @@ export default function Builder({
     });
   }, [variant.id]);
   const persistStyle = useCallback((nextOv: Record<string, unknown>, nextFixes: Record<string, string>, nextPreset: string | null) => {
+    if (readOnly) return;
     pendingStyle.current = {
       subtitle_preset_id: nextPreset,
       subtitle_overrides: { ...nextOv, ...(Object.keys(nextFixes).length ? { fixes: nextFixes } : {}) },
@@ -662,7 +679,8 @@ export default function Builder({
     setStale(true); // subtitles are part of the render fingerprint
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => void sendStyle(), 500);
-  }, [sendStyle]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sendStyle, readOnly]);
 
   // ----- flush: finish in-flight debounced saves before a row switch -----
   const pendingOvPatches = useRef<Record<string, Record<string, unknown>>>({});
@@ -680,6 +698,29 @@ export default function Builder({
     await Promise.all(jobs);
   }, [sendStyle]);
   useEffect(() => { registerFlush?.(flush); }, [registerFlush, flush]);
+
+  // expose the playhead (source seconds) so the workbench header's
+  // "Split at playhead" can act on the loaded variant
+  const tRef = useRef(0);
+  useEffect(() => { tRef.current = IN + t; });
+  useEffect(() => {
+    registerApi?.({ getPlayheadS: () => tRef.current });
+  }, [registerApi]);
+
+  // approval transitions live in the player bar now
+  const [moving, setMoving] = useState(false);
+  async function moveStatus(to: string) {
+    setMoving(true);
+    const res = await fetch("/api/variants/status", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [variant.id], to }),
+    });
+    const body = await res.json().catch(() => ({}));
+    setMoving(false);
+    if (!res.ok || !body.moved) { setNote(body.error ?? "not a legal transition"); return; }
+    if (onDataChanged) onDataChanged(); else router.refresh();
+  }
+
 
   function setStyle(patch: Partial<Style>) {
     const next = { ...S, ...patch };
@@ -717,22 +758,6 @@ export default function Builder({
     return rep ? rep + w.slice(bare.length) : w;
   };
 
-  // ----- scene rail drag ----
-  const [dragFrom, setDragFrom] = useState<number | null>(null);
-  const [dragOver, setDragOver] = useState<{ i: number; left: boolean } | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const addBtnRef = useRef<HTMLButtonElement>(null);
-  const railRef = useRef<HTMLDivElement>(null);
-  const [menuPos, setMenuPos] = useState({ left: 0, top: 0 });
-
-  useEffect(() => {
-    const close = (e: MouseEvent) => {
-      const el = e.target as Element;
-      if (!el.closest(".addmenu") && !el.closest(".scn-add")) setMenuOpen(false);
-    };
-    document.addEventListener("click", close);
-    return () => document.removeEventListener("click", close);
-  }, []);
 
   // ----- derived -----
   const shape = useMemo(() => {
@@ -768,12 +793,36 @@ export default function Builder({
       <div>
         {/* one 40px bar replaces the old title block */}
         <div className="vbar">
-          <button className="vbar-name" title="Click to rename in the table"
+          <button className="vbar-name" title="Click to rename in the row"
             onClick={() => onJumpToRename?.()}>
             {variant.name}
           </button>
           <span className="tag mk-pill">{variant.label}</span>
           <span className="tag">{variant.status.replace("_", " ")}</span>
+          {variant.status === "draft" && !readOnly && (
+            <button className="btn ghost sm" disabled={moving}
+              onClick={() => void moveStatus("in_review")}>Submit</button>
+          )}
+          {variant.status === "in_review" && !readOnly && (
+            <button className="btn ghost sm" disabled={moving}
+              onClick={() => void moveStatus("approved")}>Approve</button>
+          )}
+          {variant.renderStatus && (
+            <span className={variant.renderStatus === "done" ? "tag ok"
+              : variant.renderStatus === "failed" ? "tag flag" : "tag"}
+              title={variant.renderError ?? undefined}>
+              {variant.renderStatus === "done" ? "rendered" : variant.renderStatus}
+            </span>
+          )}
+          {stale && <span className="tag flag" title="Changed since the last render">stale</span>}
+          {readOnly && <span className="tag flag">source removed</span>}
+          {compare && !readOnly && (
+            <button className="chip" data-on={compareOn ? "1" : undefined}
+              title={`Side-by-side against ${compare.label} at the same playhead`}
+              onClick={() => onCompareToggle?.()}>
+              Compare
+            </button>
+          )}
           <i className="chipsep" />
           <div className="seg">
             {Object.keys(RATIOS).map((r) => (
@@ -1028,150 +1077,6 @@ export default function Builder({
           <span>{mmss(a0)}</span><span>{mmss(a1)}</span>
         </div>
 
-        {/* scenes */}
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginTop: 16 }}>
-          <div className="eyebrow">Scenes — drag to reorder</div>
-          <button className="btn ghost sm" disabled={busy || !scene || scene.layout === "card"}
-            onClick={() => {
-              if (!scene) return;
-              void call(`/api/scenes/${scene.id}/split`, "POST", { at_s: IN + t });
-            }}>
-            Split at playhead
-          </button>
-        </div>
-        <div className="rail-wrap">
-          <div className="rail-scenes" ref={railRef}>
-            {scenes.map((s, i) => (
-              <div key={s.id}
-                className={`scn${dragFrom === i ? " dragging" : ""}${
-                  dragOver?.i === i ? (dragOver.left ? " over-l" : " over-r") : ""}`}
-                draggable
-                data-on={i === sel ? "1" : "0"}
-                onClick={(e) => {
-                  if ((e.target as Element).closest(".op")) return;
-                  setSel(i);
-                }}
-                onDragStart={(e) => {
-                  setDragFrom(i);
-                  e.dataTransfer.effectAllowed = "move";
-                  e.dataTransfer.setData("text/plain", String(i));
-                }}
-                onDragEnd={() => { setDragFrom(null); setDragOver(null); }}
-                onDragOver={(e) => {
-                  if (dragFrom === null || dragFrom === i) return;
-                  e.preventDefault();
-                  const r = e.currentTarget.getBoundingClientRect();
-                  setDragOver({ i, left: e.clientX < r.left + r.width / 2 });
-                }}
-                onDragLeave={() => setDragOver((d) => (d?.i === i ? null : d))}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  if (dragFrom === null || dragFrom === i) return;
-                  const r = e.currentTarget.getBoundingClientRect();
-                  let to = e.clientX < r.left + r.width / 2 ? i : i + 1;
-                  if (dragFrom < to) to--;
-                  setDragOver(null);
-                  void call(`/api/scenes/${scenes[dragFrom].id}/move`, "POST", { to })
-                    .then(() => setSel(to));
-                }}>
-                <span className="pv">
-                  {s.layout === "card" ? (
-                    <span className={`pv-card${s.asset && workerUp ? " has-img" : ""}`}
-                      style={assetBg(s.asset)} />
-                  ) : s.layout === "full" ? (
-                    <span className="pv-half pv-vid" style={{ top: 0, bottom: 0 }} />
-                  ) : (
-                    <>
-                      <span className="pv-half pv-vid" style={{ top: 0, height: `${s.splitRatio * 100}%` }} />
-                      <span
-                        className={`pv-half ${s.layout === "split_product" ? "pv-ast" : "pv-vid"}${
-                          s.layout === "split_product" && s.asset && workerUp ? " has-img" : ""}`}
-                        style={{ top: `${s.splitRatio * 100}%`, bottom: 0,
-                          ...(s.layout === "split_product" ? assetBg(s.asset) : {}) }}
-                      />
-                    </>
-                  )}
-                  <span className="hnd-grip">⋮⋮</span>
-                </span>
-                <span className="ops">
-                  {i > 0 && (
-                    <button className="op" title="Move left"
-                      onClick={() => void call(`/api/scenes/${s.id}/move`, "POST", { dir: "up" }).then(() => setSel(i - 1))}>
-                      ‹
-                    </button>
-                  )}
-                  {i < scenes.length - 1 && (
-                    <button className="op" title="Move right"
-                      onClick={() => void call(`/api/scenes/${s.id}/move`, "POST", { dir: "down" }).then(() => setSel(i + 1))}>
-                      ›
-                    </button>
-                  )}
-                  {scenes.length > 1 && (
-                    <button className="op" title="Delete scene"
-                      onClick={() => void call(`/api/scenes/${s.id}`, "DELETE").then(() => setSel(Math.max(0, sel - 1)))}>
-                      ×
-                    </button>
-                  )}
-                </span>
-                <span className="lb">
-                  {LY_NAME[s.layout]}<b>{sceneDur(s).toFixed(1)}s</b>
-                </span>
-              </div>
-            ))}
-            <button className="scn-add" ref={addBtnRef} title="Add scene or apply template"
-              onClick={(e) => {
-                e.stopPropagation();
-                const r = e.currentTarget.getBoundingClientRect();
-                const w = railRef.current!.getBoundingClientRect();
-                setMenuPos({
-                  left: Math.max(0, Math.min(r.left - w.left, w.width - 190)),
-                  top: r.bottom - w.top + 6,
-                });
-                setMenuOpen((o) => !o);
-              }}>
-              +
-            </button>
-          </div>
-          <div className={`addmenu${menuOpen ? " on" : ""}`} style={menuPos}>
-            <div className="grp">Add scene</div>
-            <button onClick={() => { setMenuOpen(false); void call(`/api/variants/${variant.id}/scenes`, "POST", { layout: "full" }); }}>
-              <span className="mi"><i /></span>Full frame
-            </button>
-            <button onClick={() => {
-              setMenuOpen(false);
-              void call(`/api/variants/${variant.id}/scenes`, "POST", {
-                layout: "split_product",
-                slot_a_asset: assets.find((a) => a.kind !== "end_card")?.id ?? null,
-              });
-            }}>
-              <span className="mi"><i /><i className="ast" /></span>Product split
-            </button>
-            <button onClick={() => { setMenuOpen(false); void call(`/api/variants/${variant.id}/scenes`, "POST", { layout: "split_speakers" }); }}>
-              <span className="mi"><i /><i /></span>Speakers split
-            </button>
-            <button onClick={() => {
-              setMenuOpen(false);
-              void call(`/api/variants/${variant.id}/scenes`, "POST", {
-                layout: "card",
-                slot_a_asset: assets.find((a) => a.kind === "end_card")?.id ?? null,
-              });
-            }}>
-              <span className="mi"><i className="crd" /></span>End card
-            </button>
-            <div className="sep" />
-            <div className="grp">Apply template</div>
-            <button onClick={() => { setMenuOpen(false); void call(`/api/variants/${variant.id}/template`, "POST", { key: "plain" }).then(() => setSel(0)); }}>
-              Plain<span className="sub">1 scene</span>
-            </button>
-            <button onClick={() => { setMenuOpen(false); void call(`/api/variants/${variant.id}/template`, "POST", { key: "product" }).then(() => setSel(0)); }}>
-              Product split<span className="sub">2 scenes</span>
-            </button>
-            <button onClick={() => { setMenuOpen(false); void call(`/api/variants/${variant.id}/template`, "POST", { key: "hookfirst" }).then(() => setSel(0)); }}>
-              Hook first + card<span className="sub">3 scenes</span>
-            </button>
-          </div>
-        </div>
-
         {/* transport */}
         <div className="transport">
           <button className="tbtn pri" aria-label={playing ? "Pause" : "Play"} title="Play (space)"
@@ -1213,6 +1118,7 @@ export default function Builder({
               : `Window at ${Math.round(cropPos.x * 100)}%`}
           </div>
         </div>
+        {scenesSlot}
         {note && <p className="hint">{note}</p>}
       </div>
 
@@ -1223,7 +1129,7 @@ export default function Builder({
             {([["plain", "Plain"], ["product", "Product split"], ["hookfirst", "Hook first + card"]] as const).map(([k, lbl]) => (
               <button key={k} className="chip" data-on={shape === k ? "1" : undefined}
                 disabled={busy}
-                onClick={() => void call(`/api/variants/${variant.id}/template`, "POST", { key: k }).then(() => setSel(0))}>
+                onClick={() => void call(`/api/variants/${variant.id}/template`, "POST", { key: k }).then(() => onSelectScene(0))}>
                 {lbl}
               </button>
             ))}

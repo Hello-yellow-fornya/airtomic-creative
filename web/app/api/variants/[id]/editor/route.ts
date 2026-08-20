@@ -22,29 +22,49 @@ export async function GET(
     clip_id: string; clip_in: string; clip_out: string;
     subtitle_preset_id: string | null;
     subtitle_overrides: Record<string, unknown> | null;
-    video_id: string; video_title: string | null; video_duration: string | null;
+    video_id: string | null; video_title: string | null; video_source: string | null;
+    video_duration: string | null;
     src_w: number | null; src_h: number | null;
+    render_status: string | null; render_error: string | null;
+    ratios: string[] | null;
   }>(
     `SELECT cv.id::text, cv.label, cv.name, cv.status::text, cv.render_stale,
             c.id::text AS clip_id,
             c.source_in_s::text AS clip_in, c.source_out_s::text AS clip_out,
             cv.subtitle_preset_id::text, cv.subtitle_overrides,
-            v.id::text AS video_id, v.title AS video_title,
+            v.id::text AS video_id, v.title AS video_title, v.source::text AS video_source,
             v.duration_s::text AS video_duration,
-            v.width AS src_w, v.height AS src_h
+            v.width AS src_w, v.height AS src_h,
+            j.status::text AS render_status, j.error AS render_error,
+            rr.ratios
      FROM clip_variants cv
      JOIN clips c ON c.id = cv.clip_id
-     JOIN videos v ON v.id = c.video_id
+     LEFT JOIN videos v ON v.id = c.video_id
+     LEFT JOIN LATERAL (
+       SELECT status, error FROM jobs
+       WHERE type = 'render' AND payload->>'variant_id' = cv.id::text
+       ORDER BY id DESC LIMIT 1
+     ) j ON true
+     LEFT JOIN LATERAL (
+       SELECT array_agg(ratio) AS ratios FROM (
+         SELECT DISTINCT ON (payload->>'ratio')
+                payload->>'ratio' AS ratio, status
+         FROM jobs
+         WHERE type = 'render' AND payload->>'variant_id' = cv.id::text
+         ORDER BY payload->>'ratio', id DESC
+       ) latest WHERE latest.status = 'done'
+     ) rr ON true
      WHERE cv.id = $1`,
     [id],
   );
   if (!variant)
     return NextResponse.json({ error: "not found" }, { status: 404 });
+  const orphan = variant.video_id === null;
 
   const clipIn = parseFloat(variant.clip_in);
   const clipOut = parseFloat(variant.clip_out);
 
-  const [scenes, assets, presets, overlays, overlayStyles, words, compare] =
+  const [scenes, assets, presets, overlays, overlayStyles, words, compare, groupRows] =
     await Promise.all([
       q<{
         id: string; idx: number; layout: string; source_in_s: string | null;
@@ -77,20 +97,25 @@ export async function GET(
         "SELECT key, name, config FROM overlay_style_presets ORDER BY created_at",
       ),
       q<{ word: string; start_s: string; end_s: string }>(
-        `SELECT w.word, w.start_s::text, w.end_s::text
-         FROM transcript_words w JOIN transcripts t ON t.id = w.transcript_id
-         WHERE t.video_id = $1 AND w.start_s IS NOT NULL AND w.end_s IS NOT NULL
-           AND w.end_s > $2 AND w.start_s < $3
-         ORDER BY w.idx`,
-        [variant.video_id, clipIn - 15, clipOut + 15],
+        orphan
+          ? "SELECT NULL::text AS word, NULL::text AS start_s, NULL::text AS end_s WHERE false"
+          : `SELECT w.word, w.start_s::text, w.end_s::text
+             FROM transcript_words w JOIN transcripts t ON t.id = w.transcript_id
+             WHERE t.video_id = $1 AND w.start_s IS NOT NULL AND w.end_s IS NOT NULL
+               AND w.end_s > $2 AND w.start_s < $3
+             ORDER BY w.idx`,
+        orphan ? [] : [variant.video_id, clipIn - 15, clipOut + 15],
       ),
       // Compare baseline: the group's A variant (first label), if not us.
+      // Orphaned clips have no source to preview — excluded from Compare.
       q<{
         id: string; label: string; name: string;
         ov_text: string | null; ov_start: string | null; ov_end: string | null;
         ov_position: string | null; ov_style: string | null;
       }>(
-        `SELECT a.id::text, a.label, a.name,
+        orphan
+          ? "SELECT NULL::text AS id, NULL AS label, NULL AS name, NULL AS ov_text, NULL AS ov_start, NULL AS ov_end, NULL AS ov_position, NULL AS ov_style WHERE false"
+          : `SELECT a.id::text, a.label, a.name,
                 o.text AS ov_text, o.start_s::text AS ov_start,
                 o.end_s::text AS ov_end, o.position AS ov_position,
                 o.style AS ov_style
@@ -99,7 +124,26 @@ export async function GET(
          LEFT JOIN clip_overlays o ON o.variant_id = a.id
          WHERE a.id <> $2::uuid
          ORDER BY o.idx`,
-        [variant.clip_id, id],
+        orphan ? [] : [variant.clip_id, id],
+      ),
+      // The row strip: every variant of this clip with its scene cards.
+      q<{
+        id: string; label: string; name: string; status: string;
+        render_stale: boolean;
+        sc_id: string | null; sc_idx: number | null; sc_layout: string | null;
+        sc_in: string | null; sc_out: string | null; sc_dur: string | null;
+        sc_asset: string | null; sc_split: string | null;
+      }>(
+        `SELECT g.id::text, g.label, g.name, g.status::text, g.render_stale,
+                vs.id::text AS sc_id, vs.idx AS sc_idx, vs.layout::text AS sc_layout,
+                vs.source_in_s::text AS sc_in, vs.source_out_s::text AS sc_out,
+                vs.duration_s::text AS sc_dur, vs.slot_a_asset::text AS sc_asset,
+                vs.split_ratio::text AS sc_split
+         FROM clip_variants g
+         LEFT JOIN variant_scenes vs ON vs.variant_id = g.id
+         WHERE g.clip_id = $1
+         ORDER BY g.label, vs.idx`,
+        [variant.clip_id],
       ),
     ]);
 
@@ -115,6 +159,46 @@ export async function GET(
     scenes.length ? [scenes.map((s) => s.id)] : [],
   );
 
+  const groupRatios = await q<{ vid: string; ratio: string; status: string }>(
+    `SELECT DISTINCT ON (payload->>'variant_id', payload->>'ratio')
+            payload->>'variant_id' AS vid, payload->>'ratio' AS ratio, status
+     FROM jobs WHERE type = 'render'
+       AND payload->>'variant_id' IN
+           (SELECT id::text FROM clip_variants WHERE clip_id = $1)
+     ORDER BY payload->>'variant_id', payload->>'ratio', id DESC`,
+    [variant.clip_id],
+  );
+
+  const group: {
+    id: string; label: string; name: string; status: string;
+    renderStale: boolean; ratios: string[]; scenes: {
+      id: string; idx: number; layout: string; in: number | null;
+      out: number | null; dur: number | null; asset: string | null;
+      splitRatio: number;
+    }[];
+  }[] = [];
+  for (const r of groupRows) {
+    let g = group.find((x) => x.id === r.id);
+    if (!g) {
+      g = { id: r.id, label: r.label, name: r.name, status: r.status,
+            renderStale: r.render_stale, scenes: [],
+            ratios: groupRatios
+              .filter((x) => x.vid === r.id && x.status === "done")
+              .map((x) => x.ratio) };
+      group.push(g);
+    }
+    if (r.sc_id) {
+      g.scenes.push({
+        id: r.sc_id, idx: r.sc_idx ?? 0, layout: r.sc_layout ?? "full",
+        in: r.sc_in ? parseFloat(r.sc_in) : null,
+        out: r.sc_out ? parseFloat(r.sc_out) : null,
+        dur: r.sc_dur ? parseFloat(r.sc_dur) : null,
+        asset: r.sc_asset,
+        splitRatio: r.sc_split ? parseFloat(r.sc_split) : 0.5,
+      });
+    }
+  }
+
   return NextResponse.json({
     variant: {
       id: variant.id,
@@ -128,10 +212,17 @@ export async function GET(
       overrides: variant.subtitle_overrides ?? {},
       videoId: variant.video_id,
       videoTitle: variant.video_title,
+      videoSource: variant.video_source ?? "ad_creative",
       videoDuration: parseFloat(variant.video_duration ?? "0") || 0,
       srcW: variant.src_w ?? 16,
       srcH: variant.src_h ?? 9,
+      orphan,
+      renderStatus: variant.render_status,
+      renderError: variant.render_error,
+      ratios: variant.ratios ?? [],
     },
+    group,
+    orphan,
     scenes: scenes.map((s) => ({
       id: s.id, idx: s.idx, layout: s.layout,
       in: s.source_in_s ? parseFloat(s.source_in_s) : null,

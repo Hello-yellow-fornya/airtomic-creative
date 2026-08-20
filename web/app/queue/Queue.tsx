@@ -7,11 +7,12 @@ type Row = {
   id: string; label: string; name: string; slug: string;
   status: string; rawStatus: string;
   by: string | null; when: string | null;
-  sourceRange: string; videoTitle: string | null;
+  sourceRange: string; nVariants: number; videoTitle: string | null;
   nScenes: number; duration: number | null; pushStatus: string | null;
 };
 
 const TABS = [
+  { key: "draft", label: "Drafts" },
   { key: "in_review", label: "In review" },
   { key: "approved", label: "Approved" },
   { key: "sent", label: "Sent" },
@@ -24,6 +25,7 @@ export default function Queue({ rows }: { rows: Row[] }) {
   const [busy, setBusy] = useState(false);
 
   const counts = useMemo(() => ({
+    draft: rows.filter((r) => r.status === "draft").length,
     in_review: rows.filter((r) => r.status === "in_review").length,
     approved: rows.filter((r) => r.status === "approved").length,
     sent: rows.filter((r) => r.status === "sent").length,
@@ -60,7 +62,9 @@ export default function Queue({ rows }: { rows: Row[] }) {
       ? "Sent creatives are read-only. Meta review status updates automatically."
       : tab === "approved"
         ? `${counts.approved} approved and waiting to be sent. Select rows to push them in one batch.`
-        : `${counts.in_review} waiting on review. Approving does not send anything — approved items move to the next tab.`;
+        : tab === "draft"
+          ? `${counts.draft} in draft. Open one to keep building — submit it for review from the player bar.`
+          : `${counts.in_review} waiting on review. Approving does not send anything — approved items move to the next tab.`;
 
   return (
     <>
@@ -103,7 +107,8 @@ export default function Queue({ rows }: { rows: Row[] }) {
       <div className="card" style={{ overflow: "hidden", marginTop: 12 }}>
         {visible.length === 0 ? (
           <div className="qempty">
-            Nothing {tab === "in_review" ? "waiting for review"
+            Nothing {tab === "draft" ? "in draft"
+              : tab === "in_review" ? "waiting for review"
               : tab === "approved" ? "approved yet" : "sent yet"}.
           </div>
         ) : (
@@ -147,7 +152,7 @@ export default function Queue({ rows }: { rows: Row[] }) {
                         {r.label} · {r.name}
                       </a>
                     </div>
-                    <div className="sub">{r.sourceRange}{r.when ? ` · ${r.when}` : ""}</div>
+                    <div className="sub">{r.sourceRange} · {r.nVariants} variant{r.nVariants === 1 ? "" : "s"} in clip{r.when ? ` · ${r.when}` : ""}</div>
                   </td>
                   <td>{r.videoTitle}</td>
                   <td className="num">{r.duration !== null ? `${r.duration.toFixed(1)}s` : "—"}</td>

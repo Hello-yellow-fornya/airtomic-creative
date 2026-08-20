@@ -972,29 +972,11 @@ table.lib-list th.cb,table.lib-list td.cb{width:26px;padding-right:0}
 table.lib-list tbody tr{cursor:pointer}
 table.lib-list tbody tr:hover td{background:var(--paper)}
 
-/* Clip builder workbench: variant rows + selection-driven editor. */
-.wb-table{overflow:auto;max-height:clamp(140px,18vh,200px)}
-tr.wb-row{cursor:pointer}
-tr.wb-row td{border-left:2px solid transparent}
-tr.wb-row td:first-child{border-left:3px solid var(--line)}
-tr.wb-row.grp-first td{border-top:1px solid var(--line)}
-tr.wb-row:hover td{background:var(--paper)}
-tr.wb-row.sel-row td{background:var(--paper);box-shadow:inset 0 -1px 0 var(--line-2)}
-tr.wb-row.sel-row td:first-child{border-left:3px solid var(--ink)}
-.playglyph{display:inline-block;width:12px;color:var(--ink);font-size:10px}
-.wb-name{white-space:nowrap;max-width:320px;overflow:hidden;text-overflow:ellipsis}
-.wb-namebtn{font:inherit;font-weight:600;color:var(--ink);text-align:left;
-  max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  vertical-align:bottom}
-.wb-namebtn:hover{text-decoration:underline dotted}
+/* Clip builder workbench: inline rename input (used in variant rows). */
 .wb-rename{padding:3px 6px;border:1px solid var(--ink);border-radius:3px;
-  font:inherit;font-size:12px;width:230px;background:var(--surface)}
+  font:inherit;font-size:12px;width:210px;background:var(--surface)}
 .wb-nameerr{display:block;color:#9A2F53;font-size:10px;margin-top:2px}
-.wb-range-dim{color:var(--faint)}
 .mk-pill{font-weight:700;min-width:20px;text-align:center}
-.wb-acts{white-space:nowrap;opacity:.25;transition:opacity .1s}
-tr.wb-row:hover .wb-acts,tr.wb-row.sel-row .wb-acts{opacity:1}
-.wb-editor{margin-top:14px}
 
 /* editor bar: the 40px strip that replaced the title block */
 .vbar{display:flex;align-items:center;gap:8px;height:40px;padding:0 10px;
@@ -1013,3 +995,33 @@ tr.wb-row:hover .wb-acts,tr.wb-row.sel-row .wb-acts{opacity:1}
 .cmp-tag{position:absolute;top:6px;left:6px;z-index:7;font-size:9px;
   background:rgba(0,0,0,.55);color:#fff;padding:2px 6px;border-radius:3px}
 .cmp-note{font-size:10px;color:var(--muted);margin:-4px 0 6px}
+
+/* Variant rows: the scenes strip is the variant list. */
+.vstrip{margin-top:14px}
+.vstrip-hdr{display:flex;align-items:center;gap:10px;margin-bottom:8px;padding-left:12px}
+.vbulk{display:inline-flex;gap:6px;margin-left:6px}
+.vbulk .vdel{color:#9A2F53}
+.vrows{display:flex;flex-direction:column;gap:8px;max-height:300px;overflow-y:auto;
+  padding-right:4px}
+.vrow{display:grid;grid-template-columns:190px 1fr auto;gap:12px;align-items:center;
+  padding:6px;border-radius:var(--radius);border:1px solid transparent;cursor:pointer}
+.vrow.sel{background:var(--surface);border-color:var(--line)}
+.vrow.orphan{opacity:.6}
+.vrow-name{display:flex;align-items:center;gap:8px;min-width:0;align-self:stretch;
+  padding:4px 4px 4px 14px;border-left:3px solid var(--line)}
+.vrow.sel .vrow-name{border-left-color:var(--signal)}
+.vrow-nm{font-size:12.5px;font-weight:600;min-width:0;flex:1;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.vorph{flex:none;font-size:9.5px}
+.pencil{width:22px;height:22px;flex:none;border-radius:4px;color:var(--muted);
+  display:grid;place-items:center;opacity:0;transition:opacity .1s;font-size:11px}
+.vrow:hover .pencil,.vrow.sel .pencil{opacity:1}
+.pencil:hover{background:var(--paper);color:var(--ink)}
+.vrow-cards{margin-top:0;position:relative;padding-bottom:0}
+.vrow-cards .scn .pv{height:56px}
+.vrow-menu{z-index:80}
+.addvar{align-self:center;border:1px solid var(--line);background:var(--surface);
+  border-radius:var(--radius);padding:6px 11px;font-size:11.5px;font-weight:600;
+  color:var(--muted);white-space:nowrap;opacity:0;transition:opacity .1s}
+.vrow:hover .addvar,.vrow.sel .addvar{opacity:1}
+.addvar:hover{border-color:var(--ink);color:var(--ink)}

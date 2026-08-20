@@ -12,25 +12,26 @@ export default async function QueuePage() {
   const rows = await q<{
     id: string; label: string; name: string; slug: string; status: string;
     submitted_by: string | null; submitted_at: string | null;
-    source_range: string; video_title: string | null;
+    source_range: string; video_title: string | null; n_variants: string;
     n_scenes: string; duration: string | null; push_status: string | null;
   }>(`
     SELECT cv.id::text, cv.label, cv.name, cv.slug, cv.status::text,
            cv.submitted_by, cv.submitted_at::text,
            round(c.source_in_s) || 's–' || round(c.source_out_s) || 's' AS source_range,
-           v.title AS video_title,
+           coalesce(v.title, '(source removed)') AS video_title,
+           (SELECT count(*) FROM clip_variants x WHERE x.clip_id = cv.clip_id)::text AS n_variants,
            (SELECT count(*) FROM variant_scenes vs WHERE vs.variant_id = cv.id)::text AS n_scenes,
            (SELECT sum(COALESCE(vs.source_out_s - vs.source_in_s, vs.duration_s))::text
             FROM variant_scenes vs WHERE vs.variant_id = cv.id) AS duration,
            mp.status::text AS push_status
     FROM clip_variants cv
     JOIN clips c ON c.id = cv.clip_id
-    JOIN videos v ON v.id = c.video_id
+    LEFT JOIN videos v ON v.id = c.video_id
     LEFT JOIN LATERAL (
       SELECT status FROM meta_pushes WHERE variant_id = cv.id
       ORDER BY created_at DESC LIMIT 1
     ) mp ON true
-    WHERE cv.status::text IN ('in_review', 'approved', 'sent', 'sending', 'failed')
+    WHERE cv.status::text IN ('draft', 'in_review', 'approved', 'sent', 'sending', 'failed')
     ORDER BY cv.submitted_at DESC NULLS LAST, cv.created_at DESC`);
 
   return (
@@ -51,6 +52,7 @@ export default async function QueuePage() {
             by: r.submitted_by,
             when: r.submitted_at ? r.submitted_at.slice(0, 10) : null,
             sourceRange: r.source_range,
+            nVariants: parseInt(r.n_variants, 10),
             videoTitle: r.video_title,
             nScenes: parseInt(r.n_scenes, 10),
             duration: r.duration ? parseFloat(r.duration) : null,
