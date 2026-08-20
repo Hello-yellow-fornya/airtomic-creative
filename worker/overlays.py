@@ -62,6 +62,9 @@ def resolve_cfg(ov: dict[str, Any],
             "fs": float(sv.get("fs", 40)),
             "ol": float(sv.get("ol") or 0),
             "vp": float(sv["vp"]) if sv.get("vp") is not None else None,
+            "xp": float(sv.get("xp", 50)),
+            "w": float(sv.get("w", 80)),
+            "pr": sv.get("pr") or {},
             "wpl": int(sv["wpl"]) if sv.get("wpl") else None,
             "color": str(sv.get("color", "#FFFFFF")),
             "bg": str(sv.get("bg", "none")),
@@ -78,6 +81,9 @@ def resolve_cfg(ov: dict[str, Any],
         "ol": 0.0,
         "vp": None,  # legacy rows position via the position enum + ratio
         "wpl": None,
+        "xp": 50.0,
+        "w": 80.0,
+        "pr": {},
         "color": str(cfg["color"]),
         "bg": "pill" if cfg.get("box") else "none",
         "bg_color": str(cfg.get("box_color", "#0A0B0D")),
@@ -88,14 +94,34 @@ def resolve_cfg(ov: dict[str, Any],
     }
 
 
+def placement(ov: dict[str, Any],
+              styles: dict[str, dict[str, Any]] | None,
+              ratio: str) -> tuple[float, float, float]:
+    """(x, y, width) as fractions of the frame for one ratio. Stored
+    per ratio like crops — an overlay placed top-left in 9:16 shouldn't
+    land on a face in 1:1. Ratios without their own placement default
+    from the 9:16 base values."""
+    cfg = resolve_cfg(ov, styles)
+    over = (cfg.get("pr") or {}).get(ratio) or {}
+    if cfg["vp"] is not None:
+        xp = float(over.get("xp", cfg["xp"])) / 100
+        vp = float(over.get("vp", cfg["vp"])) / 100
+        w = float(over.get("w", cfg["w"])) / 100
+    else:
+        xp, w = 0.5, 0.8
+        vp = position_y(str(ov.get("position") or "top"), ratio)
+    return (
+        max(0.0, min(1.0, xp)),
+        max(0.0, min(1.0, vp)),
+        max(0.05, min(1.0, w)),
+    )
+
+
 def overlay_vp(ov: dict[str, Any],
                styles: dict[str, dict[str, Any]] | None,
                ratio: str) -> float:
     """Centre-line y as a fraction of frame height."""
-    cfg = resolve_cfg(ov, styles)
-    if cfg["vp"] is not None:
-        return max(0.0, min(1.0, cfg["vp"] / 100))
-    return position_y(str(ov.get("position") or "top"), ratio)
+    return placement(ov, styles, ratio)[1]
 
 
 def overlay_band(y: float, rel_height: float = 0.10) -> tuple[float, float]:
@@ -168,14 +194,20 @@ def build_overlay_ass(
         end = min(float(ov["end_s"]), clip_dur) if clip_dur else float(ov["end_s"])
         if end <= start:
             continue
-        y = round(overlay_vp(ov, styles, ratio) * play_h)
+        xp, vp, wfrac = placement(ov, styles, ratio)
+        x = round(xp * play_w)
+        y = round(vp * play_h)
+        # Wrap width: libass wraps inside PlayResX minus the margins, so
+        # the box width becomes symmetric margins; \q0 turns smart
+        # wrapping on for the event (the script default stays manual).
+        margin = max(0, round((1 - wfrac) * play_w / 2))
         text = _escape(_wrap(str(ov["text"]), cfg["wpl"]))
         if cfg["caps"]:
             text = text.upper()
         text = text.replace("\n", "\\N")
         events.append(
-            f"Dialogue: 1,{_ts(start)},{_ts(end)},{name},,0,0,0,,"
-            f"{{\\an5\\pos({play_w // 2},{y})}}{text}"
+            f"Dialogue: 1,{_ts(start)},{_ts(end)},{name},,{margin},{margin},0,,"
+            f"{{\\an5\\q0\\pos({x},{y})}}{text}"
         )
 
     return "\n".join([
@@ -216,14 +248,18 @@ def subtitle_shift_for(
     safe = SAFE.get(ratio, {"t": 8, "b": 8})
     cap = 1 - safe["b"] / 100 + 0.04     # a little into the zone beats overlap
     sub_band = (sub_vp - 0.05, sub_vp + 0.05)
+    sub_x = (0.08, 0.92)                 # subtitles wrap near full width
     lowest_bottom = None
     for ov in overlays:
         if float(ov["end_s"]) <= t_start or float(ov["start_s"]) >= t_end:
             continue
         if resolve_cfg(ov, styles)["bg"] == "none":
             continue
-        band = overlay_band(overlay_vp(ov, styles, ratio))
-        if band[0] < sub_band[1] and band[1] > sub_band[0]:
+        xp, vp, w = placement(ov, styles, ratio)
+        band = overlay_band(vp)
+        xspan = (xp - w / 2, xp + w / 2)
+        if (band[0] < sub_band[1] and band[1] > sub_band[0]
+                and xspan[0] < sub_x[1] and xspan[1] > sub_x[0]):
             if lowest_bottom is None or band[1] > lowest_bottom:
                 lowest_bottom = band[1]
     if lowest_bottom is None:

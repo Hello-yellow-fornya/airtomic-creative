@@ -36,8 +36,11 @@ type Crop = { sceneId: string; ratio: string; x: number; y: number; w: number; h
 type Asset = { id: string; name: string; kind: string };
 type Preset = { id: string; name: string; is_default: boolean; config: Record<string, unknown> };
 type Word = { w: string; s: number; e: number };
+export type OvPlacement = { xp: number; vp: number; w: number };
 export type OvSv = {
   fs: number; ol: number; vp: number; wpl: number | null;
+  xp?: number; w?: number;
+  pr?: Record<string, OvPlacement>;
   color: string; bg: "none" | "pill" | "box"; bg_color: string;
   bg_alpha: number; caps: boolean; weight: number;
 };
@@ -55,9 +58,19 @@ function ovY(position: string, ratio: string): number {
   if (position === "center") return 0.5;
   return Math.max(0.70, 1 - safe.b / 100 - 0.08);
 }
-/** Centre-line y (fraction): the overlay's stored vp wins. */
+/** Placement (x, y, width as fractions) for one ratio — per-ratio like
+ * crops, defaulting from the 9:16 base. Mirror of worker placement(). */
+function ovPlace(o: Ov, ratio: string): { xp: number; vp: number; w: number } {
+  if (!o.sv) return { xp: 0.5, vp: ovY(o.position, ratio), w: 0.8 };
+  const over = o.sv.pr?.[ratio];
+  return {
+    xp: Math.max(0, Math.min(1, (over?.xp ?? o.sv.xp ?? 50) / 100)),
+    vp: Math.max(0, Math.min(1, (over?.vp ?? o.sv.vp) / 100)),
+    w: Math.max(0.05, Math.min(1, (over?.w ?? o.sv.w ?? 80) / 100)),
+  };
+}
 function ovVp(o: Ov, ratio: string): number {
-  return o.sv ? Math.max(0, Math.min(1, o.sv.vp / 100)) : ovY(o.position, ratio);
+  return ovPlace(o, ratio).vp;
 }
 /** Mirror of worker/overlays.subtitle_shift_for. Only overlays WITH a
  * background push subtitles down — text over text is a design choice. */
@@ -71,9 +84,11 @@ function subVpWithOverlays(
   for (const o of ovs) {
     if (o.end <= t0 || o.start >= t1) continue;
     if (!hasBg(o)) continue;
-    const y = ovVp(o, ratio);
-    const band: [number, number] = [y - 0.05, y + 0.05];
-    if (band[0] < subVp + 0.05 && band[1] > subVp - 0.05)
+    const pl = ovPlace(o, ratio);
+    const band: [number, number] = [pl.vp - 0.05, pl.vp + 0.05];
+    const xspan: [number, number] = [pl.xp - pl.w / 2, pl.xp + pl.w / 2];
+    if (band[0] < subVp + 0.05 && band[1] > subVp - 0.05
+        && xspan[0] < 0.92 && xspan[1] > 0.08)
       if (lowest === null || band[1] > lowest) lowest = band[1];
   }
   return lowest === null ? subVp : Math.min(lowest + 0.07, cap);
@@ -277,6 +292,7 @@ export default function Builder({
     };
     return {
       fs: c.fs ?? 40, ol: 0, vp: ovY(o.position, bRatio) * 100, wpl: null,
+      xp: 50, w: 80,
       color: c.color ?? "#FFFFFF", bg: c.box ? "pill" : "none",
       bg_color: c.box_color ?? "#0A0B0D", bg_alpha: c.box_alpha ?? 0.75,
       caps: !!c.uppercase, weight: c.weight ?? 800,
@@ -292,6 +308,100 @@ export default function Builder({
     patchOverlayLocal(o.id, { sv, ...(viaPreset ? {} : { style: "custom" }) });
     patchOverlayDebounced(o.id, { sv, style });
   }
+  /** Placement for the ratio being previewed. */
+  const placeFor = useCallback((o: Ov) => {
+    const p = ovPlace(o, bRatio);
+    return { xp: p.xp * 100, vp: p.vp * 100, w: p.w * 100 };
+  }, [bRatio]);
+  /** Edit placement for the CURRENT ratio: 9:16 is the base; any other
+   * ratio gets (or updates) its own pr[ratio] override — like crops. */
+  function svWithPlace(o: Ov, patch: Partial<OvPlacement>): Partial<OvSv> {
+    if (bRatio === "9x16") return patch;
+    const cur = placeFor(o);
+    const sv = ovResolved(o);
+    return { pr: { ...(sv.pr ?? {}), [bRatio]: { ...cur, ...patch } } };
+  }
+  function patchPlace(o: Ov, patch: Partial<OvPlacement>) {
+    patchSv(o, svWithPlace(o, patch));
+  }
+
+  // ----- drag / resize a selected overlay in the preview -----
+  const [ovDrag, setOvDrag] = useState<{ id: string; snapX: boolean; snapY: boolean } | null>(null);
+  function patchSvLocal(o: Ov, patch: Partial<OvSv>) {
+    patchOverlayLocal(o.id, { sv: { ...ovResolved(o), ...patch }, style: "custom" });
+  }
+  function onOvDragDown(e: React.PointerEvent, o: Ov, mode: "move" | "e" | "w" | "nw" | "ne" | "sw" | "se") {
+    if (readOnly) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setTextTarget(o.id);
+    const pid = e.pointerId;
+    try { (e.currentTarget as Element).setPointerCapture(pid); } catch {}
+    const rect = srcRef.current!.getBoundingClientRect();
+    const start = placeFor(o);           // percents for the current ratio
+    const startFs = ovResolved(o).fs;
+    const px0 = e.clientX, py0 = e.clientY;
+    const cx0 = rect.left + (start.xp / 100) * rect.width;
+    const cy0 = rect.top + (start.vp / 100) * rect.height;
+    const d0 = Math.max(8, Math.hypot(px0 - cx0, py0 - cy0));
+    const safe = SAFE[bRatio] ?? { t: 8, b: 8, r: 0 };
+    let last: Partial<OvPlacement> & { fs?: number } = {};
+    const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== pid) return;
+      if (mode === "move") {
+        let xp = start.xp + ((ev.clientX - px0) / rect.width) * 100;
+        let vp = start.vp + ((ev.clientY - py0) / rect.height) * 100;
+        let sx = false, sy = false;
+        // guides: centre lines + safe-zone edges, snap at 2%, Alt disables
+        if (!ev.altKey) {
+          if (Math.abs(xp - 50) < 2) { xp = 50; sx = true; }
+          for (const ty of [50, safe.t, 100 - safe.b])
+            if (Math.abs(vp - ty) < 2) { vp = ty; sy = true; break; }
+        }
+        const half = start.w / 2;
+        xp = Math.max(half, Math.min(100 - half, xp));   // box stays in frame
+        vp = Math.max(3, Math.min(97, vp));
+        last = { xp, vp };
+        setOvDrag({ id: o.id, snapX: sx, snapY: sy });
+        patchSvLocal(o, svWithPlace(o, last));
+      } else if (mode === "e" || mode === "w") {
+        // side handles: text-box width, centre-anchored
+        const halfPx = Math.abs(ev.clientX - cx0);
+        let w = (2 * halfPx / rect.width) * 100;
+        w = Math.max(10, Math.min(100, Math.min(w, 2 * Math.min(start.xp, 100 - start.xp))));
+        last = { w };
+        setOvDrag({ id: o.id, snapX: false, snapY: false });
+        patchSvLocal(o, svWithPlace(o, last));
+      } else {
+        // corner handles: scale the font size
+        const d = Math.hypot(ev.clientX - cx0, ev.clientY - cy0);
+        const fs = Math.max(12, Math.min(120, Math.round(startFs * (d / d0))));
+        last = { fs };
+        setOvDrag({ id: o.id, snapX: false, snapY: false });
+        patchSvLocal(o, { fs });
+      }
+    };
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== pid) return;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      setOvDrag(null);
+      if (!Object.keys(last).length) return;
+      const { fs, ...placePatch } = last;
+      const sv: OvSv = {
+        ...ovResolved(o),
+        ...(Object.keys(placePatch).length ? svWithPlace(o, placePatch) : {}),
+        ...(fs !== undefined ? { fs } : {}),
+      };
+      patchOverlayLocal(o.id, { sv, style: "custom" });
+      void patchOverlay(o.id, { sv, style: "custom" });
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  }
+
   function applyOvPreset(o: Ov, key: string) {
     const c = styleCfg(key) as {
       fs?: number; weight?: number; color?: string; box?: boolean;
@@ -302,6 +412,7 @@ export default function Builder({
     const sv: OvSv = {
       fs: c.fs ?? 40, ol: 0,
       vp: pos === "top" ? 20 : pos === "center" ? 50 : 76,
+      xp: 50, w: 80, pr: {},
       wpl: null,
       color: c.color ?? "#FFFFFF", bg: c.box ? "pill" : "none",
       bg_color: c.box_color ?? "#0A0B0D", bg_alpha: c.box_alpha ?? 0.75,
@@ -1057,12 +1168,13 @@ export default function Builder({
               )}
               {compare.overlays.filter((o) => t >= o.start && t < o.end).map((o) => {
                 const cfg = ovResolved(o);
+                const cpl = ovPlace(o, bRatio);
                 return (
                   <div key={o.id} style={{
-                    position: "absolute", left: "50%",
-                    top: `${ovVp(o, bRatio) * 100}%`,
+                    position: "absolute", left: `${cpl.xp * 100}%`,
+                    top: `${cpl.vp * 100}%`,
                     transform: "translate(-50%,-50%)", zIndex: 6,
-                    maxWidth: "86%", textAlign: "center",
+                    width: `${cpl.w * 100}%`, textAlign: "center",
                     fontFamily: "'Plus Jakarta Sans','Inter',sans-serif",
                     fontWeight: cfg.weight,
                     fontSize: cfg.fs * 0.4,
@@ -1148,35 +1260,68 @@ export default function Builder({
                 same calibration the caption preview uses. */}
             {ovs.filter((o) => t >= o.start && t < o.end).map((o) => {
               const cfg = ovResolved(o);
+              const pl = ovPlace(o, bRatio);
+              const isSel = textTarget === o.id;
               const text = wrapWpl(cfg.caps ? o.text.toUpperCase() : o.text, cfg.wpl);
               return (
                 <div key={o.id} role="button" tabIndex={0}
-                  title="Click to edit this overlay's text style"
+                  className={`ovbox${isSel ? " sel" : ""}`}
+                  title={isSel ? "Drag to move · handles resize" : "Click to edit this overlay"}
                   onClick={(e) => { e.stopPropagation(); setTextTarget(o.id); }}
+                  onPointerDown={(e) => {
+                    if (!isSel) return;
+                    if ((e.target as Element).closest(".ovh")) return;
+                    onOvDragDown(e, o, "move");
+                  }}
                   style={{
-                    position: "absolute", left: "50%",
-                    top: `${ovVp(o, bRatio) * 100}%`,
+                    position: "absolute",
+                    left: `${pl.xp * 100}%`,
+                    top: `${pl.vp * 100}%`,
+                    width: `${pl.w * 100}%`,
                     transform: "translate(-50%,-50%)", zIndex: 6,
-                    maxWidth: "86%", textAlign: "center", cursor: "pointer",
+                    textAlign: "center",
+                    cursor: isSel ? "move" : "pointer",
+                  }}>
+                  <span style={{
+                    display: "inline-block", maxWidth: "100%",
                     fontFamily: "'Plus Jakarta Sans','Inter',sans-serif",
                     fontWeight: cfg.weight,
                     fontSize: cfg.fs * 0.48,
                     lineHeight: 1.15, whiteSpace: "pre-wrap",
+                    overflowWrap: "break-word",
                     color: cfg.color,
                     textShadow: cfg.bg === "none" && cfg.ol
                       ? `0 0 ${cfg.ol}px #000,0 0 ${cfg.ol}px #000` : undefined,
-                    outline: textTarget === o.id ? "1px dashed rgba(255,255,255,.7)" : "none",
-                    outlineOffset: 3,
                     ...(cfg.bg !== "none" ? {
                       background: `${cfg.bg_color}${Math.round(cfg.bg_alpha * 255).toString(16).padStart(2, "0")}`,
                       padding: "4px 10px",
                       borderRadius: cfg.bg === "pill" ? 999 : 6,
                     } : {}),
                   }}>
-                  {text}
+                    {text}
+                  </span>
+                  {isSel && !readOnly && (
+                    <>
+                      <i className="ovh side w" onPointerDown={(e) => onOvDragDown(e, o, "w")} />
+                      <i className="ovh side e" onPointerDown={(e) => onOvDragDown(e, o, "e")} />
+                      <i className="ovh corner nw" onPointerDown={(e) => onOvDragDown(e, o, "nw")} />
+                      <i className="ovh corner ne" onPointerDown={(e) => onOvDragDown(e, o, "ne")} />
+                      <i className="ovh corner sw" onPointerDown={(e) => onOvDragDown(e, o, "sw")} />
+                      <i className="ovh corner se" onPointerDown={(e) => onOvDragDown(e, o, "se")} />
+                    </>
+                  )}
                 </div>
               );
             })}
+            {/* drag guides: centre lines + the ratio's safe-zone edges */}
+            {ovDrag && (
+              <>
+                <i className={`ovguide v${ovDrag.snapX ? " on" : ""}`} style={{ left: "50%" }} />
+                <i className={`ovguide h${ovDrag.snapY ? " on" : ""}`} style={{ top: "50%" }} />
+                <i className="ovguide h zone" style={{ top: `${sz.t}%` }} />
+                <i className="ovguide h zone" style={{ top: `${100 - sz.b}%` }} />
+              </>
+            )}
 
             {/* layout overlays for the selected scene */}
             {scene && (scene.layout === "split_product" || scene.layout === "split_speakers") && (
@@ -1534,6 +1679,7 @@ export default function Builder({
           defaultOpen>
           {targetOv ? (() => {
             const tv = ovResolved(targetOv);
+            const pv = placeFor(targetOv);
             return (
               <>
                 <div className="presets">
@@ -1554,18 +1700,25 @@ export default function Builder({
                   </button>
                 </div>
                 <div className="ctrl">
-                  <label>Position</label>
-                  <select value={targetOv.position}
+                  <label>Position quick-set ({RATIOS[bRatio].label})</label>
+                  <select value=""
                     onChange={(e) => {
-                      const pos = e.target.value;
-                      const vp = pos === "top" ? 20 : pos === "center" ? 50 : 76;
-                      patchOverlayLocal(targetOv.id, { position: pos });
-                      patchOverlayDebounced(targetOv.id, { position: pos });
-                      patchSv(targetOv, { vp });
+                      const m: Record<string, [number, number]> = {
+                        tl: [22, 20], t: [50, 20], tr: [78, 20],
+                        c: [50, 50], lt: [50, 76], bl: [22, 88], br: [78, 88],
+                      };
+                      const hit = m[e.target.value];
+                      if (hit) patchPlace(targetOv, { xp: hit[0], vp: hit[1] });
+                      e.target.value = "";
                     }}>
-                    <option value="top">Top</option>
-                    <option value="center">Centre</option>
-                    <option value="lower_third">Lower third</option>
+                    <option value="">Position…</option>
+                    <option value="tl">Top-left</option>
+                    <option value="t">Top</option>
+                    <option value="tr">Top-right</option>
+                    <option value="c">Centre</option>
+                    <option value="lt">Lower third</option>
+                    <option value="bl">Bottom-left</option>
+                    <option value="br">Bottom-right</option>
                   </select>
                 </div>
                 <div className="ctrl">
@@ -1579,9 +1732,19 @@ export default function Builder({
                     onChange={(e) => patchSv(targetOv, { ol: +e.target.value })} />
                 </div>
                 <div className="ctrl">
-                  <label htmlFor="ovvp">Vertical position <b>{Math.round(tv.vp)}%</b></label>
-                  <input id="ovvp" type="range" min={5} max={95} value={tv.vp}
-                    onChange={(e) => patchSv(targetOv, { vp: +e.target.value })} />
+                  <label htmlFor="ovvp">Vertical position <b>{Math.round(pv.vp)}%</b></label>
+                  <input id="ovvp" type="range" min={3} max={97} value={Math.round(pv.vp)}
+                    onChange={(e) => patchPlace(targetOv, { vp: +e.target.value })} />
+                </div>
+                <div className="ctrl">
+                  <label htmlFor="ovxp">Horizontal position <b>{Math.round(pv.xp)}%</b></label>
+                  <input id="ovxp" type="range" min={5} max={95} value={Math.round(pv.xp)}
+                    onChange={(e) => patchPlace(targetOv, { xp: +e.target.value })} />
+                </div>
+                <div className="ctrl">
+                  <label htmlFor="ovw">Width <b>{Math.round(pv.w)}%</b></label>
+                  <input id="ovw" type="range" min={10} max={100} value={Math.round(pv.w)}
+                    onChange={(e) => patchPlace(targetOv, { w: +e.target.value })} />
                 </div>
                 <div className="ctrl">
                   <label htmlFor="ovwpl">Words per line <b>{tv.wpl ?? "manual"}</b></label>

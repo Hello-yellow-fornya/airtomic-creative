@@ -1040,3 +1040,19 @@ table.lib-list tbody tr:hover td{background:var(--paper)}
 .lib-selall{display:flex;flex-direction:column;align-items:flex-start;gap:5px;
   padding:2px 6px 2px 2px}
 .lib-selall .btn[data-on="1"]{border-color:var(--ink);color:var(--ink);background:var(--paper)}
+
+/* Overlay drag: selection box, handles, guides */
+.ovbox.sel{outline:1px dashed rgba(255,255,255,.75);outline-offset:4px}
+.ovh{position:absolute;z-index:8;background:#fff;border:1px solid var(--ink);
+  border-radius:2px;width:9px;height:9px}
+.ovh.side{top:50%;transform:translateY(-50%);cursor:ew-resize}
+.ovh.side.w{left:-6px}.ovh.side.e{right:-6px}
+.ovh.corner{cursor:nwse-resize}
+.ovh.corner.nw{left:-6px;top:-6px}.ovh.corner.se{right:-6px;bottom:-6px}
+.ovh.corner.ne{right:-6px;top:-6px;cursor:nesw-resize}
+.ovh.corner.sw{left:-6px;bottom:-6px;cursor:nesw-resize}
+.ovguide{position:absolute;z-index:5;pointer-events:none;background:rgba(255,255,255,.35)}
+.ovguide.v{top:0;bottom:0;width:1px}
+.ovguide.h{left:0;right:0;height:1px}
+.ovguide.on{background:var(--signal);box-shadow:0 0 4px rgba(255,198,41,.8)}
+.ovguide.zone{background:rgba(255,255,255,.18);border-top:1px dashed rgba(255,255,255,.25);height:0}

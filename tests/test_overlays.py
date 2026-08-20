@@ -116,3 +116,35 @@ def test_unknown_style_key_falls_back_to_defaults():
     ass = build_overlay_ass([OV(style="nope")], {}, "9x16", 1080, 1920, 10)
     assert "Dialogue:" in ass
     assert "Style: Ov0," in ass
+
+
+def test_pos_matches_stored_fractions_per_ratio():
+    # 9:16 base at (30%, 40%), 1:1 override at (70%, 20%)
+    ov = OV(sv=SV(vp=40, xp=30, w=60, pr={"1x1": {"xp": 70, "vp": 20, "w": 40}}))
+    a916 = build_overlay_ass([ov], {}, "9x16", 1080, 1920, 10)
+    assert f"\\pos({round(0.30 * 1080)},{round(0.40 * 1920)})" in a916
+    a11 = build_overlay_ass([ov], {}, "1x1", 1080, 1080, 10)
+    assert f"\\pos({round(0.70 * 1080)},{round(0.20 * 1080)})" in a11
+    # a ratio WITHOUT its own placement defaults from the 9:16 base
+    a45 = build_overlay_ass([ov], {}, "4x5", 1080, 1350, 10)
+    assert f"\\pos({round(0.30 * 1080)},{round(0.40 * 1350)})" in a45
+
+
+def test_width_becomes_wrap_margins_and_q0():
+    ov = OV(sv=SV(vp=50, xp=50, w=60))
+    ass = build_overlay_ass([ov], {}, "9x16", 1080, 1920, 10)
+    margin = round((1 - 0.60) * 1080 / 2)   # 216 per side
+    assert f",,{margin},{margin},0,," in ass
+    assert "\\q0\\pos" in ass
+
+
+def test_collision_respects_horizontal_extent():
+    # narrow pill parked at the left edge, same height as the subtitles:
+    # its box misses the subtitle band horizontally -> no push-down... but
+    # subtitles wrap near full width, so anything inside ~8-92% overlaps.
+    # Park it fully OUTSIDE that span (impossible on-frame), so instead
+    # verify a mid-frame narrow box DOES push and the vertical miss does not.
+    low_left = OV(sv=SV(vp=72, xp=20, w=30, bg="pill"))
+    assert subtitle_shift_for(1.0, 1.4, [low_left], "9x16", 0.72) > 0.72
+    high_left = OV(sv=SV(vp=20, xp=20, w=30, bg="pill"))
+    assert subtitle_shift_for(1.0, 1.4, [high_left], "9x16", 0.72) == 0.72
