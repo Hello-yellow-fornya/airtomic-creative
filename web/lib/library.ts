@@ -13,15 +13,12 @@ import { pool } from "@/lib/db";
 
 export type LibraryParams = {
   q?: string;
-  status?: "ready" | "processing" | "failed" | "visual_only";
-  perf?: boolean;
+  status?: "ready" | "processing" | "failed";
   rendition?: string;         // 9x16 | 1x1 | 4x5 …
-  stage?: string;             // UF | LF | Retargeting …
-  spendMin?: number;
   dateFrom?: string;          // YYYY-MM-DD, first ad use
   dateTo?: string;
-  dupes?: boolean;
-  source?: "longform" | "ad_creative";
+  dupes?: boolean;            // the "Find duplicates" action, not a chip
+  source?: "longform" | "ad_creative";  // tabs above the grid
   sort?: string;
   dir?: "asc" | "desc";
   page?: number;              // 1-based
@@ -80,22 +77,23 @@ export async function runLibrary(p: LibraryParams): Promise<{
                    JOIN transcript_segments s ON s.transcript_id = t.id
                    WHERE t.video_id = v.id
                    AND s.tsv @@ websearch_to_tsquery('english', ${tsq}))`;
-    where.push(`(${nameM} OR ${tagM} OR ${txM})`);
+    const adM = `EXISTS (SELECT 1 FROM video_meta_links l2
+                   JOIN ad_performance ap2 ON ap2.meta_video_id = l2.meta_video_id
+                   WHERE l2.video_id = v.id
+                   AND (ap2.ad_name ILIKE ${like} OR ap2.name_parts::text ILIKE ${like}))`;
+    where.push(`(${nameM} OR ${tagM} OR ${txM} OR ${adM})`);
     matchReason = `CASE WHEN ${nameM} THEN 'name'
                         WHEN ${tagM} THEN 'tags'
-                        WHEN ${txM} THEN 'transcript' END`;
+                        WHEN ${txM} THEN 'transcript'
+                        WHEN ${adM} THEN 'ad name' END`;
   }
 
-  if (p.status === "ready") where.push("v.status = 'ready' AND v.has_audio IS NOT FALSE");
-  else if (p.status === "visual_only") where.push("v.status = 'ready' AND v.has_audio = false");
+  if (p.status === "ready") where.push("v.status = 'ready'");
   else if (p.status === "failed") where.push("v.status = 'failed'");
   else if (p.status === "processing")
     where.push("v.status IN ('queued','transcribing','detecting','tagging')");
 
-  if (p.perf) where.push("pf.spend IS NOT NULL");
   if (p.rendition) where.push(`${arg(p.rendition)} = ANY(pf.renditions)`);
-  if (p.stage) where.push(`${arg(p.stage)} = ANY(pf.stages)`);
-  if (p.spendMin) where.push(`coalesce(pf.spend, 0) >= ${arg(p.spendMin)}`);
   if (p.dateFrom) where.push(`pf.first_use >= ${arg(p.dateFrom)}::date`);
   if (p.dateTo) where.push(`pf.first_use <= ${arg(p.dateTo)}::date`);
   if (p.source) where.push(`v.source = ${arg(p.source)}::video_source`);
@@ -194,15 +192,12 @@ async function countOnly(where: string[], args: unknown[]): Promise<number> {
 
 export function parseLibraryParams(sp: Record<string, string | string[] | undefined>): LibraryParams {
   const s = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string) : undefined);
-  const statuses = ["ready", "processing", "failed", "visual_only"] as const;
+  const statuses = ["ready", "processing", "failed"] as const;
   const status = statuses.find((x) => x === s("status"));
   return {
     q: s("q"),
     status,
-    perf: s("perf") === "1",
     rendition: s("rendition"),
-    stage: s("stage"),
-    spendMin: s("spend") ? parseFloat(s("spend")!) : undefined,
     dateFrom: s("from"),
     dateTo: s("to"),
     dupes: s("dupes") === "1",

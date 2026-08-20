@@ -30,16 +30,17 @@ export async function POST(
       await client.query("ROLLBACK");
       return NextResponse.json({ error: "clip not found" }, { status: 404 });
     }
-    const used = new Set(existing.rows.map((r) => r.label));
-    let label = "";
-    for (let i = 0; i < 26; i++) {
-      const c = String.fromCharCode(65 + i);
-      if (!used.has(c)) { label = c; break; }
-    }
-    if (!label) {
+    // Next label = successor of the HIGHEST label ever used, never a
+    // freed one: exported names like KLR_…_B are the join key back to
+    // Meta performance, so a deleted variant's label must not be reborn
+    // as a different creative.
+    const top = existing.rows.reduce(
+      (a, r) => Math.max(a, r.label.charCodeAt(0)), 64);
+    if (top >= 90) {
       await client.query("ROLLBACK");
       return NextResponse.json({ error: "26 variants is plenty" }, { status: 400 });
     }
+    const label = String.fromCharCode(top + 1);
     const clip = await client.query(
       `SELECT c.video_id::text, c.source_in_s, c.source_out_s, v.title
        FROM clips c JOIN videos v ON v.id = c.video_id WHERE c.id = $1`,
@@ -79,8 +80,8 @@ export async function POST(
 
     // overlays are variant-level: the duplicate inherits them as a start
     await client.query(
-      `INSERT INTO clip_overlays (variant_id, idx, text, start_s, end_s, position, style)
-       SELECT $1, idx, text, start_s, end_s, position, style
+      `INSERT INTO clip_overlays (variant_id, idx, text, start_s, end_s, position, style, sv)
+       SELECT $1, idx, text, start_s, end_s, position, style, sv
        FROM clip_overlays WHERE variant_id = $2`,
       [newId, srcVariant],
     );

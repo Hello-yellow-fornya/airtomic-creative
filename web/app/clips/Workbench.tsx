@@ -134,7 +134,7 @@ export default function Workbench({ initialVariantId, workerUp }: {
           return [...known, ...fresh];
         });
       }
-    } else if (res.status === 404) {
+    } else if (res.status === 404 && !silent) {
       setPayload(null);
     }
     setLoading(false);
@@ -219,9 +219,10 @@ export default function Workbench({ initialVariantId, workerUp }: {
   // initial selection: URL ?v= wins, else the server-picked default
   useEffect(() => {
     if (selId) return;
-    const fromUrl = sp.get("v");
-    const initial = fromUrl ?? initialVariantId;
-    if (initial) setSelId(initial);
+    // the server already validated ?v= and resolved invalid ids to the
+    // clip baseline — trust its answer first
+    const initial = initialVariantId ?? sp.get("v");
+    if (initial) { selRef.current = initial; setSelId(initial); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -240,8 +241,9 @@ export default function Workbench({ initialVariantId, workerUp }: {
 
   const refreshPayload = useCallback(() => {
     router.refresh();
-    if (selId) { selRef.current = selId; void loadPayload(selId, true); }
-  }, [router, selId, loadPayload]);
+    const cur = selRef.current;
+    if (cur) void loadPayload(cur, true);
+  }, [router, loadPayload]);
 
 
   // ----- keyboard: ↑/↓ move the loaded row (bounded), Enter renames -----
@@ -430,16 +432,20 @@ export default function Workbench({ initialVariantId, workerUp }: {
     if (!payload) return;
     const ids = [...checked];
     if (!ids.length) return;
-    if (!window.confirm(
-      `Delete ${ids.length} variant${ids.length > 1 ? "s" : ""}?\n\nThis permanently removes ` +
-      "them with their scenes, crops, overlays and rendered files in R2. " +
-      "Sent variants are refused. The source video and transcript are kept.",
+    const wholeClip = ids.length === orderedRows.length;
+    // A clip is only deleted when its last variant is — that path (and a
+    // bulk selection covering every variant) gets its own confirm.
+    if (!window.confirm(wholeClip
+      ? (ids.length === 1
+          ? "This is the last variant. Deleting it removes the clip."
+          : `This selects every variant (${ids.length}). Deleting them removes the clip.`)
+      : `Delete ${ids.length} variant${ids.length > 1 ? "s" : ""}?\n\nThis permanently removes ` +
+        "them with their scenes, crops, overlays and rendered files in R2. " +
+        "Sent variants are refused. The source video and transcript are kept.",
     )) return;
     setBusy(true);
     const errs: string[] = [];
-    if (ids.length === orderedRows.length) {
-      // whole clip checked — delete the clip itself (variant DELETE refuses
-      // removing the last one)
+    if (wholeClip) {
       const res = await fetch("/api/clips/delete", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clip_ids: [payload.variant.clipId] }),
@@ -457,7 +463,7 @@ export default function Workbench({ initialVariantId, workerUp }: {
     setBusy(false);
     setChecked(new Set());
     setNote(errs.length ? `Some deletions failed — ${errs.join(" · ")}` : "Deleted.");
-    if (ids.length === orderedRows.length) {
+    if (wholeClip) {
       router.push("/queue");
       return;
     }

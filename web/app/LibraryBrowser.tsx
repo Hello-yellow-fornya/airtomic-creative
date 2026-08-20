@@ -11,11 +11,9 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { LibraryRow } from "@/lib/library";
 
 const STATUS_CHIPS = [
-  ["ready", "Ready"], ["processing", "Processing"],
-  ["failed", "Failed"], ["visual_only", "Visual only"],
+  ["ready", "Ready"], ["processing", "Processing"], ["failed", "Failed"],
 ] as const;
 const RENDITIONS = ["9x16", "1x1", "4x5", "16x9"];
-const STAGES = ["UF", "LF", "Retargeting", "MOF", "BOF"];
 
 const STAGE_LABEL: Record<string, string> = {
   queued: "Queued",
@@ -214,8 +212,21 @@ export default function LibraryBrowser({
   return (
     <div>
       <div className="lib-toolbar">
+        <div className="lib-selall">
+          <input type="checkbox" className="lib-check"
+            checked={rows.length > 0 && rows.every((r) => sel.has(r.id))}
+            aria-label="Select all on this page"
+            onChange={(e) => setSel(e.target.checked
+              ? new Set(rows.map((r) => r.id)) : new Set())} />
+          <button className="btn ghost sm"
+            data-on={sp.get("dupes") === "1" ? "1" : undefined}
+            title="Show sources sharing a content hash or a name (Meta's ' (1)' download copies)"
+            onClick={() => setParams({ dupes: sp.get("dupes") === "1" ? null : "1" })}>
+            {sp.get("dupes") === "1" ? "✕ duplicates" : "Find duplicates"}
+          </button>
+        </div>
         <input className="lib-search" type="search" value={qLocal}
-          placeholder="Search name, tags, transcript…"
+          placeholder="Search name, tags, transcript, ad name…"
           onChange={(e) => onSearch(e.target.value)} />
         <span style={{ flex: 1 }} />
         <div className="seg">
@@ -229,35 +240,28 @@ export default function LibraryBrowser({
       <div className="lib-chips">
         {STATUS_CHIPS.map(([v, l]) => chip("status", v, l))}
         <i className="chipsep" />
-        {chip("source", "longform", "Long-form")}
-        {chip("source", "ad_creative", "Ad creative")}
-        <i className="chipsep" />
-        {chip("perf", "1", "Has performance")}
-        {chip("dupes", "1", "Duplicates")}
-        <i className="chipsep" />
         <select value={sp.get("rendition") ?? ""} className="chip-sel"
           onChange={(e) => setParams({ rendition: e.target.value || null })}>
           <option value="">Rendition</option>
           {RENDITIONS.map((r) => <option key={r} value={r}>{r.replace("x", ":")}</option>)}
         </select>
-        <select value={sp.get("stage") ?? ""} className="chip-sel"
-          onChange={(e) => setParams({ stage: e.target.value || null })}>
-          <option value="">Funnel stage</option>
-          {STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <input className="chip-sel" type="number" min={0} placeholder="Min spend £"
-          defaultValue={sp.get("spend") ?? ""} style={{ width: 90 }}
-          onChange={(e) => {
-            if (qTimer.current) clearTimeout(qTimer.current);
-            const v = e.target.value;
-            qTimer.current = setTimeout(() => setParams({ spend: v || null }), 400);
-          }} />
         <input className="chip-sel" type="date" title="First ad use from"
           defaultValue={sp.get("from") ?? ""}
           onChange={(e) => setParams({ from: e.target.value || null })} />
         <input className="chip-sel" type="date" title="First ad use to"
           defaultValue={sp.get("to") ?? ""}
           onChange={(e) => setParams({ to: e.target.value || null })} />
+      </div>
+
+      {/* Long-form vs Ad creative: a tab above the grid, not a chip */}
+      <div className="qtabs" style={{ marginBottom: 10 }}>
+        {([["", "All"], ["longform", "Long-form"], ["ad_creative", "Ad creative"]] as const).map(([v, l]) => (
+          <button key={v} className="qtab"
+            data-on={(sp.get("source") ?? "") === v ? "1" : undefined}
+            onClick={() => setParams({ source: v || null })}>
+            {l}
+          </button>
+        ))}
       </div>
 
       <div className={`bulk${sel.size ? " on" : ""}`}>
