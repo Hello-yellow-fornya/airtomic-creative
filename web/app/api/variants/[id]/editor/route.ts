@@ -130,16 +130,29 @@ export async function GET(
       q<{
         id: string; label: string; name: string; status: string;
         render_stale: boolean;
+        sub_preset: string | null;
+        sub_overrides: Record<string, unknown> | null;
+        g_render_status: string | null; g_render_error: string | null;
         sc_id: string | null; sc_idx: number | null; sc_layout: string | null;
         sc_in: string | null; sc_out: string | null; sc_dur: string | null;
         sc_asset: string | null; sc_split: string | null;
+        sc_lifted: boolean | null; sc_audio: string | null;
       }>(
         `SELECT g.id::text, g.label, g.name, g.status::text, g.render_stale,
+                g.subtitle_preset_id::text AS sub_preset,
+                g.subtitle_overrides AS sub_overrides,
+                gj.status::text AS g_render_status, gj.error AS g_render_error,
                 vs.id::text AS sc_id, vs.idx AS sc_idx, vs.layout::text AS sc_layout,
                 vs.source_in_s::text AS sc_in, vs.source_out_s::text AS sc_out,
                 vs.duration_s::text AS sc_dur, vs.slot_a_asset::text AS sc_asset,
-                vs.split_ratio::text AS sc_split
+                vs.split_ratio::text AS sc_split, vs.lifted AS sc_lifted,
+                vs.audio::text AS sc_audio
          FROM clip_variants g
+         LEFT JOIN LATERAL (
+           SELECT status, error FROM jobs
+           WHERE type = 'render' AND payload->>'variant_id' = g.id::text
+           ORDER BY id DESC LIMIT 1
+         ) gj ON true
          LEFT JOIN variant_scenes vs ON vs.variant_id = g.id
          WHERE g.clip_id = $1
          ORDER BY g.label, vs.idx`,
@@ -159,6 +172,31 @@ export async function GET(
     scenes.length ? [scenes.map((s) => s.id)] : [],
   );
 
+  const [groupOverlays, groupCrops] = await Promise.all([
+    q<{
+      vid: string; id: string; text: string; start_s: string; end_s: string;
+      position: string; style: string;
+    }>(
+      `SELECT o.variant_id::text AS vid, o.id::text, o.text,
+              o.start_s::text, o.end_s::text, o.position, o.style
+       FROM clip_overlays o
+       WHERE o.variant_id IN (SELECT id FROM clip_variants WHERE clip_id = $1)
+       ORDER BY o.variant_id, o.idx`,
+      [variant.clip_id],
+    ),
+    q<{
+      vid: string; scene_id: string; ratio: string; crop_x: string;
+      crop_y: string; crop_w: string; crop_h: string;
+    }>(
+      `SELECT vs.variant_id::text AS vid, sc.scene_id::text, sc.ratio::text,
+              sc.crop_x::text, sc.crop_y::text, sc.crop_w::text, sc.crop_h::text
+       FROM scene_crops sc
+       JOIN variant_scenes vs ON vs.id = sc.scene_id
+       WHERE vs.variant_id IN (SELECT id FROM clip_variants WHERE clip_id = $1)`,
+      [variant.clip_id],
+    ),
+  ]);
+
   const groupRatios = await q<{ vid: string; ratio: string; status: string }>(
     `SELECT DISTINCT ON (payload->>'variant_id', payload->>'ratio')
             payload->>'variant_id' AS vid, payload->>'ratio' AS ratio, status
@@ -171,10 +209,15 @@ export async function GET(
 
   const group: {
     id: string; label: string; name: string; status: string;
-    renderStale: boolean; ratios: string[]; scenes: {
+    renderStale: boolean; ratios: string[];
+    presetId: string | null; overrides: Record<string, unknown>;
+    renderStatus: string | null; renderError: string | null;
+    overlays: { id: string; text: string; start: number; end: number; position: string; style: string }[];
+    crops: { sceneId: string; ratio: string; x: number; y: number; w: number; h: number }[];
+    scenes: {
       id: string; idx: number; layout: string; in: number | null;
       out: number | null; dur: number | null; asset: string | null;
-      splitRatio: number;
+      splitRatio: number; lifted: boolean; audio: string;
     }[];
   }[] = [];
   for (const r of groupRows) {
@@ -182,6 +225,22 @@ export async function GET(
     if (!g) {
       g = { id: r.id, label: r.label, name: r.name, status: r.status,
             renderStale: r.render_stale, scenes: [],
+            presetId: r.sub_preset, overrides: r.sub_overrides ?? {},
+            renderStatus: r.g_render_status, renderError: r.g_render_error,
+            overlays: groupOverlays
+              .filter((o) => o.vid === r.id)
+              .map((o) => ({
+                id: o.id, text: o.text,
+                start: parseFloat(o.start_s), end: parseFloat(o.end_s),
+                position: o.position, style: o.style,
+              })),
+            crops: groupCrops
+              .filter((c) => c.vid === r.id)
+              .map((c) => ({
+                sceneId: c.scene_id, ratio: c.ratio,
+                x: parseFloat(c.crop_x), y: parseFloat(c.crop_y),
+                w: parseFloat(c.crop_w), h: parseFloat(c.crop_h),
+              })),
             ratios: groupRatios
               .filter((x) => x.vid === r.id && x.status === "done")
               .map((x) => x.ratio) };
@@ -195,6 +254,8 @@ export async function GET(
         dur: r.sc_dur ? parseFloat(r.sc_dur) : null,
         asset: r.sc_asset,
         splitRatio: r.sc_split ? parseFloat(r.sc_split) : 0.5,
+        lifted: r.sc_lifted ?? true,
+        audio: r.sc_audio ?? "source",
       });
     }
   }

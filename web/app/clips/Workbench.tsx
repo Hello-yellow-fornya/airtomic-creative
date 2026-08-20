@@ -20,11 +20,15 @@ import Builder, { type ComparePayload } from "../variants/[id]/Builder";
 type GroupScene = {
   id: string; idx: number; layout: string; in: number | null;
   out: number | null; dur: number | null; asset: string | null;
-  splitRatio: number;
+  splitRatio: number; lifted: boolean; audio: string;
 };
 type GroupVariant = {
   id: string; label: string; name: string; status: string;
   renderStale: boolean; ratios: string[]; scenes: GroupScene[];
+  presetId: string | null; overrides: Record<string, unknown>;
+  renderStatus: string | null; renderError: string | null;
+  overlays: { id: string; text: string; start: number; end: number; position: string; style: string }[];
+  crops: { sceneId: string; ratio: string; x: number; y: number; w: number; h: number }[];
 };
 
 type EditorPayload = {
@@ -83,7 +87,12 @@ export default function Workbench({ initialVariantId, workerUp }: {
 
   const [selId, setSelId] = useState<string | null>(null);
   const [selScene, setSelScene] = useState(0);
-  const [payload, setPayload] = useState<EditorPayload | null>(null);
+  const [payload, setPayloadRaw] = useState<EditorPayload | null>(null);
+  const [dataVersion, setDataVersion] = useState(0);
+  const setPayload = useCallback((p: EditorPayload | null) => {
+    setPayloadRaw(p);
+    setDataVersion((v) => v + 1);
+  }, []);
   const [loading, setLoading] = useState(false);
   const [compareOn, setCompareOn] = useState(false);
   const [checked, setChecked] = useState<Set<string>>(new Set());
@@ -105,9 +114,11 @@ export default function Workbench({ initialVariantId, workerUp }: {
     apiRef.current = api;
   }, []);
 
-  const loadPayload = useCallback(async (id: string) => {
-    setLoading(true);
+  const selRef = useRef<string | null>(null);
+  const loadPayload = useCallback(async (id: string, silent = false) => {
+    if (!silent) setLoading(true);
     const res = await fetch(`/api/variants/${id}/editor`);
+    if (silent && selRef.current !== id) { setLoading(false); return; }
     if (res.ok) {
       const p: EditorPayload = await res.json();
       setPayload(p);
@@ -129,17 +140,81 @@ export default function Workbench({ initialVariantId, workerUp }: {
     setLoading(false);
   }, []);
 
-  const select = useCallback(async (id: string, sceneIdx = 0) => {
+  const group = useMemo(() => payload?.group ?? [], [payload]);
+  const byId = useMemo(() => new Map(group.map((g) => [g.id, g])), [group]);
+  const orderedRows = useMemo(
+    () => rowOrder.map((id) => byId.get(id)).filter(Boolean) as GroupVariant[],
+    [rowOrder, byId]);
+  const orphan = payload?.orphan ?? false;
+  const loaded = selId ? byId.get(selId) : undefined;
+
+  /** Sibling payloads are synthesised from the last full response — the
+   * group carries every variant's scenes, crops, overlays and subtitle
+   * settings, so switching inside a clip needs no network. */
+  const synthesize = useCallback((id: string): EditorPayload | null => {
+    const base = payload;
+    if (!base) return null;
+    const g = base.group.find((x) => x.id === id);
+    if (!g) return null;
+    const a = base.group[0];
+    return {
+      ...base,
+      variant: {
+        ...base.variant,
+        id: g.id, label: g.label, name: g.name, status: g.status,
+        presetId: g.presetId, overrides: g.overrides,
+        renderStatus: g.renderStatus, renderError: g.renderError,
+        ratios: g.ratios,
+      },
+      scenes: g.scenes.map((s) => ({ ...s })),
+      crops: g.crops,
+      overlays: g.overlays,
+      renderStale: g.renderStale,
+      compare: !base.orphan && a && a.id !== id
+        ? { id: a.id, label: a.label, name: a.name, overlays: a.overlays }
+        : null,
+    };
+  }, [payload]);
+
+  const [flushFail, setFlushFail] = useState<{
+    variantId: string; name: string; retry: () => Promise<void>;
+  } | null>(null);
+
+  const kickFlush = useCallback((outgoingId: string | null) => {
+    const fl = flushRef.current;
+    flushRef.current = null;
+    if (!fl || !outgoingId) return;
+    const name = byId.get(outgoingId)?.name ?? "variant";
+    // autosave leaves the critical path: snapshot happens synchronously
+    // inside flush; failures surface as a toast with a way back
+    void fl().catch((e: Error & { retry?: () => Promise<void> }) => {
+      setFlushFail({
+        variantId: outgoingId, name,
+        retry: e.retry ?? (async () => {}),
+      });
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [byId]);
+
+  const select = useCallback((id: string, sceneIdx = 0) => {
     if (id === selId) { setSelScene(sceneIdx); return; }
-    // finish any in-flight autosave on the outgoing variant first
-    if (flushRef.current) { await flushRef.current(); flushRef.current = null; }
+    kickFlush(selId);
+    // optimistic: edge + URL move synchronously, panel follows
     setSelId(id);
+    selRef.current = id;
     setSelScene(sceneIdx);
     setCompareOn(false);
     const p = new URLSearchParams(sp.toString());
     p.set("v", id);
     window.history.replaceState(null, "", `?${p.toString()}`);
-  }, [selId, sp]);
+    const synth = synthesize(id);
+    if (synth) {
+      setPayload(synth);
+      void loadPayload(id, true); // background revalidate, never blocks
+    } else {
+      void loadPayload(id);
+    }
+  }, [selId, sp, synthesize, kickFlush, loadPayload, setPayload]);
 
   // initial selection: URL ?v= wins, else the server-picked default
   useEffect(() => {
@@ -151,21 +226,23 @@ export default function Workbench({ initialVariantId, workerUp }: {
   }, []);
 
   useEffect(() => {
-    if (selId) void loadPayload(selId);
-  }, [selId, loadPayload]);
+    if (selId && !payload) { selRef.current = selId; void loadPayload(selId); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selId]);
+
+  // the "flush before load" guarantee becomes "flush before unload":
+  // pending edits are fired with keepalive when the page goes away
+  useEffect(() => {
+    const onHide = () => { void flushRef.current?.(); };
+    window.addEventListener("pagehide", onHide);
+    return () => window.removeEventListener("pagehide", onHide);
+  }, []);
 
   const refreshPayload = useCallback(() => {
     router.refresh();
-    if (selId) void loadPayload(selId);
+    if (selId) { selRef.current = selId; void loadPayload(selId, true); }
   }, [router, selId, loadPayload]);
 
-  const group = useMemo(() => payload?.group ?? [], [payload]);
-  const byId = useMemo(() => new Map(group.map((g) => [g.id, g])), [group]);
-  const orderedRows = useMemo(
-    () => rowOrder.map((id) => byId.get(id)).filter(Boolean) as GroupVariant[],
-    [rowOrder, byId]);
-  const orphan = payload?.orphan ?? false;
-  const loaded = selId ? byId.get(selId) : undefined;
 
   // ----- keyboard: ↑/↓ move the loaded row (bounded), Enter renames -----
   useEffect(() => {
@@ -613,6 +690,21 @@ export default function Workbench({ initialVariantId, workerUp }: {
         })}
       </div>
       {note && <p className="hint">{note}</p>}
+      {flushFail && (
+        <p className="hint" style={{ color: "#9A2F53" }}>
+          Autosave failed on “{flushFail.name}” — the edit is held, not lost.
+          <button className="btn ghost sm" style={{ marginLeft: 6 }}
+            onClick={() => {
+              void flushFail.retry().then(
+                () => setFlushFail(null),
+                () => setNote("retry failed — check the connection"));
+            }}>Retry save</button>
+          <button className="btn ghost sm" style={{ marginLeft: 4 }}
+            onClick={() => { setFlushFail(null); void select(flushFail.variantId); }}>
+            Back to “{flushFail.name}”
+          </button>
+        </p>
+      )}
     </div>
   );
 
@@ -629,7 +721,7 @@ export default function Workbench({ initialVariantId, workerUp }: {
   return payload ? (
     <div style={{ opacity: loading ? 0.55 : 1, transition: "opacity .12s" }}>
       <Builder
-        key={payload.variant.id}
+        key={payload.variant.clipId}
         variant={payload.variant}
         scenes={payload.scenes}
         crops={payload.crops}
@@ -649,6 +741,7 @@ export default function Workbench({ initialVariantId, workerUp }: {
         onDataChanged={refreshPayload}
         selScene={selScene}
         onSelectScene={setSelScene}
+        dataVersion={dataVersion}
         scenesSlot={rowsStrip}
         readOnly={orphan}
       />

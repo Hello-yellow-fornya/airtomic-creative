@@ -83,6 +83,10 @@ const LY_NAME: Record<string, string> = {
 };
 const MIN_CLIP = 3;
 
+/** Filmstrip frames are a property of (source, context window) — cached
+ * for the session so variant/clip switches never regenerate them. */
+const FRAME_CACHE = new Map<string, string[]>();
+
 type Style = {
   fs: number; ol: number; vp: number; wpl: number; hl: string;
   caps: boolean; box: boolean;
@@ -114,7 +118,7 @@ export default function Builder({
   overlays, overlayStyles, renderStale,
   compare = null, compareOn = false, onCompareToggle,
   onJumpToRename, registerFlush, registerApi, onDataChanged,
-  selScene, onSelectScene, scenesSlot, readOnly = false,
+  selScene, onSelectScene, scenesSlot, readOnly = false, dataVersion = 0,
 }: {
   variant: VariantInfo; scenes: Scene[]; crops: Crop[];
   assets: Asset[]; presets: Preset[]; words: Word[]; workerUp: boolean;
@@ -127,6 +131,7 @@ export default function Builder({
   onDataChanged?: () => void;
   selScene: number;
   onSelectScene: (i: number) => void;
+  dataVersion?: number;
   scenesSlot?: React.ReactNode;
   readOnly?: boolean;
 }) {
@@ -158,15 +163,14 @@ export default function Builder({
   const activePreset =
     presets.find((p) => p.id === variant.presetId) ??
     presets.find((p) => p.is_default) ?? presets[0];
-  const seedStyle = useCallback((): Style => {
+  const seedStyle = (): Style => {
     const c = { ...(activePreset?.config ?? {}), ...variant.overrides } as Record<string, unknown>;
     return {
       fs: Number(c.fs ?? 30), ol: Number(c.ol ?? 3), vp: Number(c.vp ?? 72),
       wpl: Number(c.wpl ?? 4), hl: String(c.hl ?? "#FFC629"),
       caps: !!c.caps, box: !!c.box,
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  };
   const [S, setS] = useState<Style>(seedStyle);
   const [presetId, setPresetId] = useState<string | null>(activePreset?.id ?? null);
   const [styleOv, setStyleOv] = useState<Record<string, unknown>>(() => {
@@ -186,6 +190,30 @@ export default function Builder({
   const [suggestions, setSuggestions] = useState<{ text: string; angle: string }[] | null>(null);
   const [suggesting, setSuggesting] = useState(false);
   const ovSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  const seededFor = useRef<string>(variant.id + ":0");
+  useEffect(() => {
+    const tag = `${variant.id}:${dataVersion}`;
+    if (seededFor.current === tag) return;
+    seededFor.current = tag;
+    setOvs(overlays);
+    setStale(renderStale);
+    setPresetId(activePreset?.id ?? null);
+    const o = { ...variant.overrides };
+    delete o.fixes;
+    setStyleOv(o);
+    setFixes({ ...((variant.overrides.fixes as Record<string, string>) ?? {}) });
+    setS(seedStyle());
+    setSuggestFor(null);
+    setSuggestions(null);
+    setNote(null);
+    pendingStyle.current = null;
+    for (const t of Object.values(ovSaveTimers.current)) clearTimeout(t);
+    ovSaveTimers.current = {};
+    pendingOvPatches.current = {};
+  // seeding is driven by identity + version, not by every prop identity
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [variant.id, dataVersion]);
 
   const styleCfg = useCallback(
     (key: string) => overlayStyles.find((s) => s.key === key)?.config ?? {},
@@ -463,9 +491,12 @@ export default function Builder({
   // ----- filmstrip -----
   const [frames, setFrames] = useState<string[] | null>(null);
   useEffect(() => {
-    if (!workerUp) return;
-    let dead = false;
+    if (!workerUp || !variant.videoId) return;
     const [a, b] = ctx;
+    const cacheKey = `${variant.videoId}:${a.toFixed(1)}:${b.toFixed(1)}`;
+    const hit = FRAME_CACHE.get(cacheKey);
+    if (hit) { setFrames(hit); return; }
+    let dead = false;
     const v = document.createElement("video");
     v.crossOrigin = "anonymous";
     v.muted = true;
@@ -492,7 +523,7 @@ export default function Builder({
           g?.drawImage(v, 0, 0, 96, 54);
           grabbed.push(canvas.toDataURL("image/jpeg", 0.6));
         }
-        if (!dead) setFrames(grabbed);
+        if (!dead) { FRAME_CACHE.set(cacheKey, grabbed); setFrames(grabbed); }
       } catch {
         /* CORS or load failure — keep the neutral gradient tiles */
       }
@@ -686,17 +717,40 @@ export default function Builder({
   const pendingOvPatches = useRef<Record<string, Record<string, unknown>>>({});
   const flush = useCallback(async () => {
     if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
-    const jobs: Promise<unknown>[] = [sendStyle()];
-    for (const [oid, patch] of Object.entries(pendingOvPatches.current)) {
-      clearTimeout(ovSaveTimers.current[oid]);
-      jobs.push(fetch(`/api/overlays/${oid}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patch),
-      }));
-    }
+    // snapshot pending edits synchronously — nothing after this tick can
+    // lose them, even though the caller no longer awaits us
+    const styleBody = pendingStyle.current;
+    pendingStyle.current = null;
+    const ovPatches = Object.entries(pendingOvPatches.current);
+    for (const [oid] of ovPatches) clearTimeout(ovSaveTimers.current[oid]);
     pendingOvPatches.current = {};
-    await Promise.all(jobs);
-  }, [sendStyle]);
+    if (!styleBody && !ovPatches.length) return;
+
+    const vid = variant.id;
+    const send = async () => {
+      const reqs: Promise<Response>[] = [];
+      if (styleBody)
+        reqs.push(fetch(`/api/variants/${vid}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(styleBody), keepalive: true,
+        }));
+      for (const [oid, patch] of ovPatches)
+        reqs.push(fetch(`/api/overlays/${oid}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch), keepalive: true,
+        }));
+      const results = await Promise.allSettled(reqs);
+      const bad = results.filter(
+        (r) => r.status === "rejected" || !(r as PromiseFulfilledResult<Response>).value.ok);
+      if (bad.length) throw new Error(`${bad.length} save(s) failed`);
+    };
+    try {
+      await send();
+    } catch (e) {
+      throw Object.assign(
+        e instanceof Error ? e : new Error(String(e)), { retry: send });
+    }
+  }, [variant.id]);
   useEffect(() => { registerFlush?.(flush); }, [registerFlush, flush]);
 
   // expose the playhead (source seconds) so the workbench header's
