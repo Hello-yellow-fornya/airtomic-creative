@@ -321,16 +321,35 @@ def run(apply: bool, since: str | None, until: str | None,
         ("META_APP_ID", cfg.meta_app_id),
         ("META_APP_SECRET", cfg.meta_app_secret),
         ("META_SYSTEM_USER_TOKEN", cfg.meta_system_user_token),
-        ("META_AD_ACCOUNT_ID", cfg.meta_ad_account_id),
     ) if not v]
     if missing:
         log.error("missing env: %s", ", ".join(missing))
         return 2
 
+    account_id = cfg.meta_ad_account_id
+    if not account_id:
+        # Single-client tool: when the env var is absent but the token can
+        # reach exactly one ad account, that account is unambiguous. More
+        # than one (or none) still errors — never guess between accounts.
+        probe = MetaClient(
+            app_id=cfg.meta_app_id, app_secret=cfg.meta_app_secret,
+            access_token=cfg.meta_system_user_token,
+            ad_account_id="", api_version=cfg.meta_api_version,
+        )
+        accounts = probe.accessible_ad_accounts()
+        if len(accounts) != 1:
+            log.error("META_AD_ACCOUNT_ID unset and token reaches %s accounts"
+                      " — set the env var", len(accounts))
+            return 2
+        account_id = accounts[0]["id"]
+        log.warning("META_AD_ACCOUNT_ID unset — using the token's sole "
+                    "accessible account %s (%s)", account_id,
+                    accounts[0].get("name"))
+
     client = MetaClient(
         app_id=cfg.meta_app_id, app_secret=cfg.meta_app_secret,
         access_token=cfg.meta_system_user_token,
-        ad_account_id=cfg.meta_ad_account_id,
+        ad_account_id=account_id,
         api_version=cfg.meta_api_version,
     )
 
