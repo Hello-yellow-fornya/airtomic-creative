@@ -56,6 +56,14 @@ def handle(conn: psycopg.Connection, cfg: Config, s3, job: dict[str, Any]) -> No
         out_path = render_variant(conn, cfg, s3, variant_id, ratio, tmp)
         key = f"exports/{variant_id}/{ratio}.mp4"
         r2.upload_file(s3, cfg.r2_bucket, key, out_path, "video/mp4")
+        # Sidecar SRT from the same remapped words as the burn-in — lets
+        # the team drop our transcription into their own edit unstyled.
+        srt_path = Path(tmp) / "subs.srt"
+        if srt_path.exists():
+            r2.upload_file(
+                s3, cfg.r2_bucket, f"exports/{variant_id}/{ratio}.srt",
+                str(srt_path), "application/x-subrip",
+            )
 
     conn.execute(
         "UPDATE clip_variants SET export_uri = %s WHERE id = %s",
@@ -121,10 +129,14 @@ def render_variant(conn: psycopg.Connection, cfg: Config, s3, variant_id: str,
     ]
     _apply_fixes(word_dicts, clip["subtitle_overrides"] or {})
     out_words = subtitles.output_words(scenes, word_dicts)
+    preset = _load_preset(conn, clip)
     ass_path = str(Path(workdir) / "subs.ass")
     Path(ass_path).write_text(
-        subtitles.build_ass(out_words, _load_preset(conn, clip), target_w, target_h)
+        subtitles.build_ass(out_words, preset, target_w, target_h)
     )
+    # Sidecar SRT from the SAME out_words list — same remap, cannot drift.
+    wpl = max(1, int((preset or {}).get("wpl", subtitles.DEFAULT_PRESET["wpl"])))
+    (Path(workdir) / "subs.srt").write_text(subtitles.build_srt(out_words, wpl))
 
     out_path = str(Path(workdir) / f"render_{ratio}.mp4")
     cmd = _build_command(

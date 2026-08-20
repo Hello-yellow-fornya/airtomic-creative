@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { adName as sharedAdName, slugify } from "@/lib/adname";
 
 type V = {
   id: string; label: string; name: string; slug: string; status: string;
@@ -8,9 +9,6 @@ type V = {
   nScenes: number; duration: number | null; hasCard: boolean; hasSplit: boolean;
   pushStatus: string | null; pushError: string | null;
 };
-
-const slugify = (s: string) =>
-  s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 18);
 
 export default function Send({
   variants, fromQueue, metaConfigured,
@@ -26,16 +24,9 @@ export default function Send({
   const [libTag, setLibTag] = useState("KLR_POD");
   const lib = mode === "lib";
 
-  // Ad naming per convention: KLR_{SOURCE}_{topic}_c{NN}_{LABEL}_{slug}.
-  // Topic and cut number come from the clip name until the recommendation
-  // engine supplies them.
-  const adName = (v: V) => {
-    const src = v.videoSource === "longform" ? "POD" : "AD";
-    const topic = slugify(v.clipName ?? "clip").replace(/-/g, "_") || "clip";
-    return lib
-      ? `${libTag}_${v.label}_${v.slug}`
-      : `KLR_${src}_${topic}_${v.label}_${v.slug}`;
-  };
+  // Ad naming per convention (shared with export downloads): see lib/adname.
+  const adName = (v: V) =>
+    lib ? `${libTag}_${v.label}_${v.slug}` : sharedAdName(v);
 
   const utmFor = (v: V) => {
     const base = lp.trim();

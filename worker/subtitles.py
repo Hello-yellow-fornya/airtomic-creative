@@ -41,6 +41,32 @@ def output_words(
     return out
 
 
+def build_srt(out_words: list[dict[str, Any]], wpl: int = 4) -> str:
+    """Sidecar SRT from the SAME remapped output-timeline word list the ASS
+    burn-in uses — same source, so the two cannot drift. One cue per line of
+    `wpl` words (the same grouping as the burn-in), running from the line's
+    first word to its last, truncated so it never overlaps the next cue."""
+    words = sorted(out_words, key=lambda w: (w["start"], w["end"]))
+    lines = [words[i:i + wpl] for i in range(0, len(words), wpl)]
+    cues = []
+    for i, line in enumerate(lines):
+        start = line[0]["start"]
+        end = max(line[-1]["end"], start + 0.05)
+        if i + 1 < len(lines):
+            end = min(max(lines[i + 1][0]["start"], start + 0.05), end)
+        text = " ".join(w["word"] for w in line)
+        cues.append(f"{i + 1}\n{_srt_ts(start)} --> {_srt_ts(end)}\n{text}\n")
+    return "\n".join(cues)
+
+
+def _srt_ts(seconds: float) -> str:
+    ms = max(0, round(seconds * 1000))
+    h, rem = divmod(ms, 3_600_000)
+    m, rem = divmod(rem, 60_000)
+    s, ms = divmod(rem, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
 DEFAULT_PRESET = {
     "font": "Inter", "fs": 30, "ol": 3, "vp": 72,
     "wpl": 4, "hl": "#FFC629", "caps": False, "box": False,

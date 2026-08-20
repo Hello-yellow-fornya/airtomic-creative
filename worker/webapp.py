@@ -270,11 +270,19 @@ def make_server(cfg: Config) -> ThreadingHTTPServer:
                 )
                 return
 
-            m = re.fullmatch(r"/export/([0-9a-f-]{36})/([0-9a-z.]+)", url.path)
+            # Exports: ratio with optional extension — 9x16, 9x16.mp4,
+            # 9x16.srt (the sidecar). ?dl=<name> forces a download with an
+            # ad-convention filename instead of a UUID.
+            m = re.fullmatch(
+                r"/export/([0-9a-f-]{36})/([0-9a-z.x]+?)(\.(mp4|srt))?", url.path
+            )
             if m:
-                # export_uri on the variant is the LAST render; a specific
-                # ratio lives at the conventional key exports/{id}/{ratio}.mp4
-                self._presign_key(key, f"exports/{m.group(1)}/{m.group(2)}.mp4")
+                ext = m.group(4) or "mp4"
+                obj_key = f"exports/{m.group(1)}/{m.group(2)}.{ext}"
+                dl = params.get("dl", [None])[0]
+                if dl:
+                    dl = re.sub(r"[^A-Za-z0-9._-]+", "_", dl)[:150]
+                self._presign_key(key, obj_key, download_as=dl)
                 return
 
             if url.path != "/":
@@ -342,12 +350,15 @@ def make_server(cfg: Config) -> ThreadingHTTPServer:
                 "Location": r2.presign_get(s3, bucket, obj_key, expires_s=3600),
             })
 
-        def _presign_key(self, key: str, obj_key: str) -> None:
+        def _presign_key(self, key: str, obj_key: str,
+                         download_as: str | None = None) -> None:
             if not authed(key):
                 self._respond(401, "unauthorised")
                 return
             self._respond(303, "", {
-                "Location": r2.presign_get(s3, cfg.r2_bucket, obj_key, expires_s=3600),
+                "Location": r2.presign_get(s3, cfg.r2_bucket, obj_key,
+                                           expires_s=3600,
+                                           download_as=download_as),
             })
 
         def do_POST(self):

@@ -848,6 +848,27 @@ table.ads .bar i{display:block;height:100%;background:var(--teal)}
 .thandle.dragging{background:#000;box-shadow:0 0 0 2px rgba(255,198,41,.55);pointer-events:none}
 .thandle[data-hide="1"]{display:none}
 
+/* Export playback: per-ratio chips in the clips list + player modal. */
+.exchip{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;
+  border:1px solid var(--line);border-radius:999px;background:var(--surface);
+  font-family:var(--font-mono),monospace;font-size:10px;font-weight:600;
+  color:var(--ink);cursor:pointer}
+.exchip:hover{border-color:var(--ink);background:var(--paper)}
+
+.exmodal{position:fixed;inset:0;z-index:80;background:rgba(10,11,13,.72);
+  display:flex;align-items:center;justify-content:center;padding:24px}
+.exmodal-card{background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--radius);max-width:min(880px,94vw);width:auto;
+  display:flex;flex-direction:column;overflow:hidden;
+  box-shadow:0 18px 60px rgba(0,0,0,.45)}
+.exmodal-head{display:flex;align-items:center;gap:10px;padding:10px 14px;
+  border-bottom:1px solid var(--line)}
+.exmodal-stage{background:#0E0F12;display:flex;align-items:center;
+  justify-content:center;padding:14px;min-width:320px}
+.exmodal-stage video{display:block;border-radius:4px;background:#000}
+.exmodal-foot{display:flex;align-items:center;gap:9px;padding:10px 14px;
+  border-top:1px solid var(--line)}
+
 .selhint{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   font-family:var(--font-mono),monospace;font-size:10px;color:rgba(255,255,255,.62);
   pointer-events:none;white-space:nowrap}

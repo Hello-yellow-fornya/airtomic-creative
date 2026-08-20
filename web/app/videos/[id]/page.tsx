@@ -70,6 +70,12 @@ export default async function VideoPage({
           </span>
         }
       >
+        {candidates.length > 0 && (
+          <a className="btn ghost sm" href={`/api/videos/${video.id}/markers`}
+            title="The suggested cuts as timecoded markers against the full source — open the podcast in Premiere/AE with the good moments already flagged">
+            Markers CSV
+          </a>
+        )}
         <RenameButton videoId={video.id} current={video.title} />
       </Topbar>
       <section className="screen" style={{ padding: "13px 22px 40px" }}>

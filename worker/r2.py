@@ -42,9 +42,17 @@ def parse_uri(uri: str) -> tuple[str, str]:
     return bucket, key
 
 
-def presign_get(s3, bucket: str, key: str, expires_s: int = PRESIGN_EXPIRY_S) -> str:
+def presign_get(s3, bucket: str, key: str, expires_s: int = PRESIGN_EXPIRY_S,
+                download_as: str | None = None) -> str:
+    """download_as forces a browser download with that filename via
+    response-content-disposition — how exports get ad-convention names
+    instead of UUIDs."""
+    params: dict = {"Bucket": bucket, "Key": key}
+    if download_as:
+        safe = download_as.replace('"', "").replace("\\", "")[:150]
+        params["ResponseContentDisposition"] = f'attachment; filename="{safe}"'
     return s3.generate_presigned_url(
-        "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=expires_s
+        "get_object", Params=params, ExpiresIn=expires_s
     )
 
 
