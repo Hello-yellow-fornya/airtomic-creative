@@ -146,6 +146,14 @@ def handle(conn: psycopg.Connection, cfg: Config, s3, job: dict[str, Any]) -> No
     if video is None:
         raise RecommendError(f"video {video_id} not found")
 
+    # Ad creatives are the corpus we learn FROM, not source material to cut
+    # clips out of — scoring them would burn a Claude call per video on
+    # suggestions nobody opens. Skip straight to ready.
+    if str(video["source"]) == "ad_creative":
+        log.info("video %s is an ad creative — skipping candidate scoring", video_id)
+        pipeline.advance(conn, video_id, "recommend")
+        return
+
     transcript_text, n_segments = _transcript_text(conn, video_id)
     if not n_segments:
         # Nothing to score is not a failure — the video is still usable.

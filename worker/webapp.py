@@ -233,23 +233,33 @@ def make_server(cfg: Config) -> ThreadingHTTPServer:
                     self._json(409, {"error": "meta not configured",
                                      "missing": missing})
                     return
-                client = meta.MetaClient(
-                    app_id=cfg.meta_app_id,
-                    app_secret=cfg.meta_app_secret,
-                    access_token=cfg.meta_system_user_token,
-                    ad_account_id=cfg.meta_ad_account_id or "",
-                    api_version=cfg.meta_api_version,
-                    page_id=cfg.meta_page_id,
-                    instagram_actor_id=cfg.meta_instagram_actor_id,
-                )
-                self._json(200, {
-                    "identity": {
-                        "page_id_set": bool(cfg.meta_page_id),
-                        "instagram_actor_id_set": bool(cfg.meta_instagram_actor_id),
-                        "ad_account_id_set": bool(cfg.meta_ad_account_id),
-                    },
-                    **client.diag(),
-                })
+                # A crash here previously killed the connection with no
+                # response, surfacing as a bare 502 at Railway's edge with
+                # nothing to debug from outside. Catch everything and put
+                # the traceback in the (token-gated) response instead.
+                try:
+                    client = meta.MetaClient(
+                        app_id=cfg.meta_app_id,
+                        app_secret=cfg.meta_app_secret,
+                        access_token=cfg.meta_system_user_token,
+                        ad_account_id=cfg.meta_ad_account_id or "",
+                        api_version=cfg.meta_api_version,
+                        page_id=cfg.meta_page_id,
+                        instagram_actor_id=cfg.meta_instagram_actor_id,
+                    )
+                    self._json(200, {
+                        "identity": {
+                            "page_id_set": bool(cfg.meta_page_id),
+                            "instagram_actor_id_set": bool(cfg.meta_instagram_actor_id),
+                            "ad_account_id_set": bool(cfg.meta_ad_account_id),
+                        },
+                        **client.diag(),
+                    })
+                except Exception:
+                    import traceback
+                    log.exception("meta diag failed")
+                    self._json(500, {"error": "diag crashed",
+                                     "traceback": traceback.format_exc()[-2000:]})
                 return
 
             m = re.fullmatch(r"/media/([0-9a-f-]{36})", url.path)

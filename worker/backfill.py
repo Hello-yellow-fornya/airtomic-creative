@@ -295,9 +295,28 @@ def build_plan(client: MetaClient, since: str | None, until: str | None,
     }
 
 
+def handle(conn, cfg, s3, job: dict[str, Any]) -> None:
+    """The `backfill` job: run an APPLY on the worker, which holds the
+    R2 + Meta env. Enqueued deliberately (never by the pipeline); payload
+    keys: limit, min_spend, skip_media, since, until."""
+    p = job["payload"]
+    code = run(
+        apply=True,
+        since=p.get("since"), until=p.get("until"),
+        limit=int(p["limit"]) if p.get("limit") is not None else None,
+        skip_media=bool(p.get("skip_media")),
+        min_spend=float(p.get("min_spend") or 0),
+        conn=conn, s3=s3, cfg=cfg,
+    )
+    if code != 0:
+        raise MetaError(f"backfill finished with failures (exit {code}) — "
+                        "see worker logs; successes are kept")
+
+
 def run(apply: bool, since: str | None, until: str | None,
-        limit: int | None, skip_media: bool, min_spend: float) -> int:
-    cfg = config.load()
+        limit: int | None, skip_media: bool, min_spend: float,
+        conn=None, s3=None, cfg=None) -> int:
+    cfg = cfg or config.load()
     missing = [n for n, v in (
         ("META_APP_ID", cfg.meta_app_id),
         ("META_APP_SECRET", cfg.meta_app_secret),
@@ -347,9 +366,9 @@ def run(apply: bool, since: str | None, until: str | None,
                  " (media skipped)" if skip_media else "")
         return 0
 
-    conn = db.connect(cfg.database_url)
-    s3 = r2.client(cfg.r2_account_id, cfg.r2_access_key_id,
-                   cfg.r2_secret_access_key)
+    conn = conn or db.connect(cfg.database_url)
+    s3 = s3 or r2.client(cfg.r2_account_id, cfg.r2_access_key_id,
+                         cfg.r2_secret_access_key)
 
     with conn.transaction():
         for r_ in rows:
