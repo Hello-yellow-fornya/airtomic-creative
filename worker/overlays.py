@@ -253,7 +253,10 @@ def subtitle_shift_for(
     for ov in overlays:
         if float(ov["end_s"]) <= t_start or float(ov["start_s"]) >= t_end:
             continue
-        if resolve_cfg(ov, styles)["bg"] == "none":
+        ov_cfg = resolve_cfg(ov, styles)
+        # 0% opacity keeps the box geometry but is visually background-less
+        # — it must not push subtitles; any opacity above 0 does.
+        if ov_cfg["bg"] == "none" or ov_cfg["bg_alpha"] <= 0:
             continue
         xp, vp, w = placement(ov, styles, ratio)
         band = overlay_band(vp)

@@ -1056,3 +1056,9 @@ table.lib-list tbody tr:hover td{background:var(--paper)}
 .ovguide.h{left:0;right:0;height:1px}
 .ovguide.on{background:var(--signal);box-shadow:0 0 4px rgba(255,198,41,.8)}
 .ovguide.zone{background:rgba(255,255,255,.18);border-top:1px dashed rgba(255,255,255,.25);height:0}
+
+/* Transparent swatch: checkerboard */
+.sw.transparent{background:
+  linear-gradient(45deg,#C9C6BE 25%,transparent 25%,transparent 75%,#C9C6BE 75%),
+  linear-gradient(45deg,#C9C6BE 25%,#F4F3F0 25%,#F4F3F0 75%,#C9C6BE 75%);
+  background-size:8px 8px;background-position:0 0,4px 4px}

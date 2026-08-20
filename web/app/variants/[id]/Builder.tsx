@@ -128,6 +128,7 @@ type Style = {
   fs: number; ol: number; vp: number; wpl: number; hl: string;
   caps: boolean; box: boolean;
   color: string; bg: "none" | "pill" | "box"; bgColor: string;
+  bgAlpha: number;
 };
 
 // Brand palette for the Text style panel swatches.
@@ -221,6 +222,7 @@ export default function Builder({
       caps: !!c.caps, box: bg !== "none",
       color: String(c.color ?? "#FFFFFF"), bg,
       bgColor: String(c.bg_color ?? "#000000"),
+      bgAlpha: Number(c.bg_alpha ?? 0.62),
     };
   };
   const [S, setS] = useState<Style>(seedStyle);
@@ -277,9 +279,11 @@ export default function Builder({
     [overlayStyles]);
   // background presence decides subtitle push-down (collision rule)
   const ovHasBg = useCallback(
-    (o: Ov) => o.sv
-      ? o.sv.bg !== "none"
-      : !!(styleCfg(o.style) as { box?: boolean }).box,
+    (o: Ov) => {
+      if (o.sv) return o.sv.bg !== "none" && (o.sv.bg_alpha ?? 0.75) > 0;
+      const c = styleCfg(o.style) as { box?: boolean; box_alpha?: number };
+      return !!c.box && (c.box_alpha ?? 0.75) > 0;
+    },
     [styleCfg]);
 
   /** Effective resolved values for preview — stored sv, or the legacy
@@ -1023,7 +1027,8 @@ export default function Builder({
     const ov = { ...styleOv };
     for (const [k, v] of Object.entries(patch)) {
       if (k === "box") continue;              // superseded by bg
-      ov[k === "bgColor" ? "bg_color" : k] = v;  // worker key names
+      const key = k === "bgColor" ? "bg_color" : k === "bgAlpha" ? "bg_alpha" : k;
+      ov[key] = v;
     }
     setStyleOv(ov);
     persistStyle(ov, fixes, presetId);
@@ -1040,6 +1045,7 @@ export default function Builder({
       caps: !!c.caps, box: bg !== "none",
       color: String(c.color ?? "#FFFFFF"), bg,
       bgColor: String(c.bg_color ?? "#000000"),
+      bgAlpha: Number(c.bg_alpha ?? 0.62),
     });
     persistStyle({}, fixes, p.id);
   }
@@ -1241,7 +1247,8 @@ export default function Builder({
                   ? `0 0 ${S.ol}px #000,0 0 ${S.ol}px #000,0 ${S.ol / 2}px ${S.ol}px rgba(0,0,0,.6)`
                   : "none",
                 ...(S.bg !== "none"
-                  ? { background: `${S.bgColor}9E`, padding: "5px 9px",
+                  ? { background: `${S.bgColor}${Math.round(Math.max(0, Math.min(1, S.bgAlpha)) * 255).toString(16).padStart(2, "0")}`,
+                      padding: "5px 9px",
                       borderRadius: S.bg === "pill" ? 999 : 3 }
                   : {}),
               }}>
@@ -1775,17 +1782,31 @@ export default function Builder({
                   </div>
                 </div>
                 {tv.bg !== "none" && (
-                  <div className="ctrl">
-                    <label>Background colour</label>
-                    <div className="swatches">
-                      {BG_COLORS.map((c) => (
-                        <button key={c} className="sw" style={{ background: c }}
-                          data-on={tv.bg_color.toUpperCase() === c.toUpperCase() ? "1" : undefined}
-                          aria-label={`Background ${c}`}
-                          onClick={() => patchSv(targetOv, { bg_color: c, bg_alpha: 1 })} />
-                      ))}
+                  <>
+                    <div className="ctrl">
+                      <label>Background colour</label>
+                      <div className="swatches">
+                        {BG_COLORS.map((c) => (
+                          <button key={c} className="sw" style={{ background: c }}
+                            data-on={tv.bg_color.toUpperCase() === c.toUpperCase() && tv.bg_alpha > 0 ? "1" : undefined}
+                            aria-label={`Background ${c}`}
+                            onClick={() => patchSv(targetOv, { bg_color: c })} />
+                        ))}
+                        <button className="sw transparent"
+                          data-on={tv.bg_alpha === 0 ? "1" : undefined}
+                          title="Transparent — keeps the box geometry, so subtitle push-down turns off without losing the layout"
+                          aria-label="Background transparent"
+                          onClick={() => patchSv(targetOv, { bg_alpha: 0 })} />
+                      </div>
                     </div>
-                  </div>
+                    <div className="ctrl">
+                      <label htmlFor="ovba">Opacity <b>{Math.round(tv.bg_alpha * 100)}%</b></label>
+                      <input id="ovba" type="range" min={0} max={100}
+                        value={Math.round(tv.bg_alpha * 100)}
+                        title="Background only — the text keeps full opacity"
+                        onChange={(e) => patchSv(targetOv, { bg_alpha: +e.target.value / 100 })} />
+                    </div>
+                  </>
                 )}
                 <label className="toggle">
                   <input type="checkbox" checked={tv.caps}
@@ -1851,17 +1872,30 @@ export default function Builder({
                 </div>
               </div>
               {S.bg !== "none" && (
-                <div className="ctrl">
-                  <label>Background colour</label>
-                  <div className="swatches">
-                    {BG_COLORS.map((c) => (
-                      <button key={c} className="sw" style={{ background: c }}
-                        data-on={S.bgColor.toUpperCase() === c.toUpperCase() ? "1" : undefined}
-                        aria-label={`Background ${c}`}
-                        onClick={() => setStyle({ bgColor: c })} />
-                    ))}
+                <>
+                  <div className="ctrl">
+                    <label>Background colour</label>
+                    <div className="swatches">
+                      {BG_COLORS.map((c) => (
+                        <button key={c} className="sw" style={{ background: c }}
+                          data-on={S.bgColor.toUpperCase() === c.toUpperCase() && S.bgAlpha > 0 ? "1" : undefined}
+                          aria-label={`Background ${c}`}
+                          onClick={() => setStyle({ bgColor: c })} />
+                      ))}
+                      <button className="sw transparent"
+                        data-on={S.bgAlpha === 0 ? "1" : undefined}
+                        title="Transparent background"
+                        aria-label="Background transparent"
+                        onClick={() => setStyle({ bgAlpha: 0 })} />
+                    </div>
                   </div>
-                </div>
+                  <div className="ctrl">
+                    <label htmlFor="subba">Opacity <b>{Math.round(S.bgAlpha * 100)}%</b></label>
+                    <input id="subba" type="range" min={0} max={100}
+                      value={Math.round(S.bgAlpha * 100)}
+                      onChange={(e) => setStyle({ bgAlpha: +e.target.value / 100 })} />
+                  </div>
+                </>
               )}
               <div className="ctrl">
                 <label>Active word</label>

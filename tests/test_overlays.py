@@ -148,3 +148,15 @@ def test_collision_respects_horizontal_extent():
     assert subtitle_shift_for(1.0, 1.4, [low_left], "9x16", 0.72) > 0.72
     high_left = OV(sv=SV(vp=20, xp=20, w=30, bg="pill"))
     assert subtitle_shift_for(1.0, 1.4, [high_left], "9x16", 0.72) == 0.72
+
+
+def test_zero_opacity_background_never_pushes():
+    # geometry kept (pill), but 0% opacity: no push-down
+    ghost = OV(sv=SV(vp=72, xp=50, w=80, bg="pill", bg_alpha=0.0))
+    assert subtitle_shift_for(1.0, 1.4, [ghost], "9x16", 0.72) == 0.72
+    # any opacity above 0 pushes
+    faint = OV(sv=SV(vp=72, xp=50, w=80, bg="pill", bg_alpha=0.05))
+    assert subtitle_shift_for(1.0, 1.4, [faint], "9x16", 0.72) > 0.72
+    # burn: alpha byte on BackColour (0.0 -> FF fully transparent)
+    ass = build_overlay_ass([ghost], {}, "9x16", 1080, 1920, 10)
+    assert "&HFF0D0B0A&" in ass
