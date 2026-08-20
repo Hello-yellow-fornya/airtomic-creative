@@ -20,5 +20,7 @@ export async function POST(
      VALUES ('render', jsonb_build_object('variant_id', $1::text, 'ratio', $2::text))`,
     [id, ratio],
   );
+  // a fresh render is what "Re-render" asked for — clear the stale flag
+  await q("UPDATE clip_variants SET render_stale = false WHERE id = $1", [id]);
   return NextResponse.json({ ok: true });
 }

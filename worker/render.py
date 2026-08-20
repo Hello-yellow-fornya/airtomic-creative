@@ -24,7 +24,7 @@ from typing import Any
 
 import psycopg
 
-from . import r2, subtitles
+from . import overlays, r2, subtitles
 from .config import Config
 
 # Output pixel sizes per output_ratio (docs/prototype.html RATIOS).
@@ -130,9 +130,38 @@ def render_variant(conn: psycopg.Connection, cfg: Config, s3, variant_id: str,
     _apply_fixes(word_dicts, clip["subtitle_overrides"] or {})
     out_words = subtitles.output_words(scenes, word_dicts)
     preset = _load_preset(conn, clip)
+
+    # Text overlays: a layer above subtitles, times on the output timeline.
+    ovs = conn.execute(
+        "SELECT text, start_s, end_s, position, style FROM clip_overlays "
+        "WHERE variant_id = %s ORDER BY idx",
+        (variant_id,),
+    ).fetchall()
+    ov_dicts = [
+        {"text": o["text"], "start_s": float(o["start_s"]),
+         "end_s": float(o["end_s"]), "position": o["position"],
+         "style": o["style"]}
+        for o in ovs
+    ]
+    overlay_ass_path = None
+    vp_for = None
+    if ov_dicts:
+        style_rows = conn.execute(
+            "SELECT key, config FROM overlay_style_presets"
+        ).fetchall()
+        styles = {r["key"]: r["config"] for r in style_rows}
+        clip_dur = sum(subtitles.scene_duration(s) for s in scenes)
+        overlay_ass_path = str(Path(workdir) / "overlays.ass")
+        Path(overlay_ass_path).write_text(overlays.build_overlay_ass(
+            ov_dicts, styles, ratio, target_w, target_h, clip_dur,
+        ))
+        sub_vp = float({**subtitles.DEFAULT_PRESET, **(preset or {})}["vp"]) / 100
+        vp_for = lambda s, e: overlays.subtitle_shift_for(  # noqa: E731
+            s, e, ov_dicts, ratio, sub_vp)
+
     ass_path = str(Path(workdir) / "subs.ass")
     Path(ass_path).write_text(
-        subtitles.build_ass(out_words, preset, target_w, target_h)
+        subtitles.build_ass(out_words, preset, target_w, target_h, vp_for=vp_for)
     )
     # Sidecar SRT from the SAME out_words list — same remap, cannot drift.
     wpl = max(1, int((preset or {}).get("wpl", subtitles.DEFAULT_PRESET["wpl"])))
@@ -141,7 +170,7 @@ def render_variant(conn: psycopg.Connection, cfg: Config, s3, variant_id: str,
     out_path = str(Path(workdir) / f"render_{ratio}.mp4")
     cmd = _build_command(
         scenes, crops, assets, src_path, src_ar, target_w, target_h,
-        ass_path, out_path,
+        ass_path, out_path, overlay_ass_path=overlay_ass_path,
     )
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
@@ -357,7 +386,12 @@ def _build_command(
     filters.append(
         "".join(concat_pads) + f"concat=n={len(scenes)}:v=1:a=1[vc][ac]"
     )
-    filters.append(f"[vc]ass={ass_path}[vout]")
+    if overlay_ass_path:
+        # overlays composite ABOVE the subtitle burn
+        filters.append(f"[vc]ass={ass_path}[vsub]")
+        filters.append(f"[vsub]ass={overlay_ass_path}[vout]")
+    else:
+        filters.append(f"[vc]ass={ass_path}[vout]")
 
     return [
         "ffmpeg", "-y", "-v", "error",

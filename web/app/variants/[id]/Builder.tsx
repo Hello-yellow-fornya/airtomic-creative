@@ -30,6 +30,35 @@ type Crop = { sceneId: string; ratio: string; x: number; y: number; w: number; h
 type Asset = { id: string; name: string; kind: string };
 type Preset = { id: string; name: string; is_default: boolean; config: Record<string, unknown> };
 type Word = { w: string; s: number; e: number };
+type Ov = {
+  id: string; text: string; start: number; end: number;
+  position: string; style: string;
+};
+type OvStyle = { key: string; name: string; config: Record<string, unknown> };
+
+/** Mirror of worker/overlays.position_y — preview and burn must agree. */
+function ovY(position: string, ratio: string): number {
+  const safe = SAFE[ratio] ?? { t: 8, b: 8, r: 0 };
+  if (position === "top") return Math.min(safe.t / 100 + 0.06, 0.30);
+  if (position === "center") return 0.5;
+  return Math.max(0.70, 1 - safe.b / 100 - 0.08);
+}
+/** Mirror of worker/overlays.subtitle_shift_for (collision push-down). */
+function subVpWithOverlays(
+  t0: number, t1: number, ovs: Ov[], ratio: string, subVp: number,
+): number {
+  const safe = SAFE[ratio] ?? { t: 8, b: 8, r: 0 };
+  const cap = 1 - safe.b / 100 + 0.04;
+  let lowest: number | null = null;
+  for (const o of ovs) {
+    if (o.end <= t0 || o.start >= t1) continue;
+    const y = ovY(o.position, ratio);
+    const band: [number, number] = [y - 0.05, y + 0.05];
+    if (band[0] < subVp + 0.05 && band[1] > subVp - 0.05)
+      if (lowest === null || band[1] > lowest) lowest = band[1];
+  }
+  return lowest === null ? subVp : Math.min(lowest + 0.07, cap);
+}
 
 const RATIOS: Record<string, { ar: number; label: string; px: string; use: string }> = {
   "9x16": { ar: 9 / 16, label: "9:16", px: "1080×1920", use: "Reels, Stories" },
@@ -77,9 +106,11 @@ const clock = (t: number) =>
 
 export default function Builder({
   variant, siblings, scenes, crops, assets, presets, words, workerUp,
+  overlays, overlayStyles, renderStale,
 }: {
   variant: VariantInfo; siblings: Sibling[]; scenes: Scene[]; crops: Crop[];
   assets: Asset[]; presets: Preset[]; words: Word[]; workerUp: boolean;
+  overlays: Ov[]; overlayStyles: OvStyle[]; renderStale: boolean;
 }) {
   const router = useRouter();
   const srcAr = variant.srcW / Math.max(variant.srcH, 1);
@@ -127,6 +158,72 @@ export default function Builder({
     () => ({ ...((variant.overrides.fixes as Record<string, string>) ?? {}) }),
   );
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ----- text overlays (a layer above subtitles) -----
+  const [ovs, setOvs] = useState<Ov[]>(overlays);
+  const [stale, setStale] = useState(renderStale);
+  const [suggestFor, setSuggestFor] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<{ text: string; angle: string }[] | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const ovSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  const styleCfg = useCallback(
+    (key: string) => overlayStyles.find((s) => s.key === key)?.config ?? {},
+    [overlayStyles]);
+
+  async function addOverlay() {
+    const res = await fetch(`/api/variants/${variant.id}/overlays`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: "New overlay", start_s: 0, end_s: Math.min(3, clipDur) }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) { setNote(body.error ?? res.statusText); return; }
+    setOvs((o) => [...o, {
+      id: body.overlay.id, text: body.overlay.text,
+      start: parseFloat(body.overlay.start_s), end: parseFloat(body.overlay.end_s),
+      position: body.overlay.position, style: body.overlay.style,
+    }]);
+    setStale(true);
+  }
+  function patchOverlayLocal(id: string, patch: Partial<Ov>) {
+    setOvs((o) => o.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+  }
+  async function patchOverlay(id: string, patch: Record<string, unknown>) {
+    const res = await fetch(`/api/overlays/${id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (res.ok) setStale(true);
+    else setNote((await res.json().catch(() => ({}))).error ?? "overlay save failed");
+  }
+  function patchOverlayDebounced(id: string, patch: Record<string, unknown>) {
+    clearTimeout(ovSaveTimers.current[id]);
+    ovSaveTimers.current[id] = setTimeout(() => void patchOverlay(id, patch), 500);
+  }
+  async function delOverlay(id: string) {
+    setOvs((o) => o.filter((x) => x.id !== id));
+    setStale(true);
+    await fetch(`/api/overlays/${id}`, { method: "DELETE" });
+  }
+  async function suggestHook(ov: Ov) {
+    setSuggestFor(ov.id);
+    setSuggestions(null);
+    setSuggesting(true);
+    try {
+      const res = await fetch(`/api/variants/${variant.id}/suggest-hook`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ start_s: ov.start, end_s: ov.end }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? res.statusText);
+      setSuggestions(body.options ?? []);
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+      setSuggestFor(null);
+    } finally {
+      setSuggesting(false);
+    }
+  }
 
   // ----- playback -----
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -362,6 +459,50 @@ export default function Builder({
    * frame as you choose it. Playback pauses for the drag and resumes on
    * release if it was running. Same hardened pattern as the crop drag:
    * state in locals, listeners on window, capture best-effort. */
+  /** Overlay bar drag on the filmstrip: body moves the range, the edge
+   * grips resize it. Live-scrubs the moving boundary like the trim
+   * handles; persists once on release. */
+  function onOvBarDown(e: React.PointerEvent, o: Ov) {
+    e.preventDefault();
+    e.stopPropagation();
+    const target = e.target as Element;
+    const mode = target.classList.contains("l") ? "l"
+      : target.classList.contains("r") ? "r" : "move";
+    const pid = e.pointerId;
+    try { e.currentTarget.setPointerCapture(pid); } catch {}
+    const grab = timeAt(e.clientX) - IN;
+    const orig = { start: o.start, end: o.end };
+    let last = orig;
+    const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== pid) return;
+      const dt = (timeAt(ev.clientX) - IN) - grab;
+      let start = orig.start, end = orig.end;
+      if (mode === "move") {
+        const len = orig.end - orig.start;
+        start = Math.max(0, Math.min(Math.max(clipDur - len, 0), orig.start + dt));
+        end = start + len;
+      } else if (mode === "l") {
+        start = Math.max(0, Math.min(orig.start + dt, orig.end - 0.3));
+      } else {
+        end = Math.min(clipDur, Math.max(orig.end + dt, orig.start + 0.3));
+      }
+      last = { start, end };
+      patchOverlayLocal(o.id, last);
+      seek(mode === "r" ? end : start);
+    };
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== pid) return;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      if (last.start !== orig.start || last.end !== orig.end)
+        void patchOverlay(o.id, { start_s: last.start, end_s: last.end });
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  }
+
   function onHandleDown(mode: "l" | "r") {
     return (e: React.PointerEvent) => {
       e.preventDefault();
@@ -636,13 +777,14 @@ export default function Builder({
               </div>
             )}
 
-            {/* live captions */}
+            {/* live captions — pushed down when an overlay occupies their band */}
             {line && scene?.layout !== "card" && (
               <div className="cap" style={{
                 fontFamily: "var(--font-inter),sans-serif", fontWeight: 700,
                 lineHeight: 1.22, fontSize: capFont, color: "#fff",
                 letterSpacing: "-.01em",
-                top: `${S.vp}%`, transform: "translateY(-50%)",
+                top: `${subVpWithOverlays(t, t + 0.4, ovs, bRatio, S.vp / 100) * 100}%`,
+                transform: "translateY(-50%)",
                 textShadow: S.ol
                   ? `0 0 ${S.ol}px #000,0 0 ${S.ol}px #000,0 ${S.ol / 2}px ${S.ol}px rgba(0,0,0,.6)`
                   : "none",
@@ -659,6 +801,35 @@ export default function Builder({
                 </div>
               </div>
             )}
+
+            {/* text overlays — live preview, layered above captions.
+                fs is design px at 1080 output width; the stage is ~520px,
+                same calibration the caption preview uses. */}
+            {ovs.filter((o) => t >= o.start && t < o.end).map((o) => {
+              const cfg = styleCfg(o.style) as {
+                fs?: number; weight?: number; color?: string; box?: boolean;
+                box_color?: string; box_alpha?: number; uppercase?: boolean;
+              };
+              return (
+                <div key={o.id} style={{
+                  position: "absolute", left: "50%",
+                  top: `${ovY(o.position, bRatio) * 100}%`,
+                  transform: "translate(-50%,-50%)", zIndex: 6,
+                  maxWidth: "86%", textAlign: "center",
+                  fontFamily: "'Plus Jakarta Sans','Inter',sans-serif",
+                  fontWeight: cfg.weight ?? 700,
+                  fontSize: (cfg.fs ?? 40) * 0.48,
+                  lineHeight: 1.15, whiteSpace: "pre-wrap",
+                  color: cfg.color ?? "#fff",
+                  ...(cfg.box ? {
+                    background: `${cfg.box_color ?? "#0A0B0D"}${Math.round((cfg.box_alpha ?? 0.75) * 255).toString(16).padStart(2, "0")}`,
+                    padding: "4px 10px", borderRadius: 6,
+                  } : {}),
+                }}>
+                  {cfg.uppercase ? o.text.toUpperCase() : o.text}
+                </div>
+              );
+            })}
 
             {/* layout overlays for the selected scene */}
             {scene && (scene.layout === "split_product" || scene.layout === "split_speakers") && (
@@ -737,6 +908,19 @@ export default function Builder({
             <div className="hnd r" role="slider" aria-label="Clip end"
               onPointerDown={onHandleDown("r")} />
           </div>
+          {/* overlay time ranges: drag body to move, edges to resize */}
+          {ovs.map((o) => {
+            const l = ((IN + o.start - a0) / span) * 100;
+            const r = ((IN + Math.min(o.end, clipDur) - a0) / span) * 100;
+            return (
+              <div key={o.id} className="ovbar"
+                title={`${o.text.split("\n")[0]} · ${o.start.toFixed(1)}–${o.end.toFixed(1)}s`}
+                style={{ left: `${l}%`, width: `${Math.max(r - l, 1)}%` }}
+                onPointerDown={(e) => onOvBarDown(e, o)}>
+                <i className="e l" /><span>{o.text.split("\n")[0]}</span><i className="e r" />
+              </div>
+            );
+          })}
           <div className="strip-ph" style={{ left: `${((IN + Math.min(t, clipDur) - a0) / span) * 100}%` }} />
         </div>
         <div className="strip-scale">
@@ -1140,6 +1324,85 @@ export default function Builder({
               </div>
             </div>
           )}
+        </Acc>
+
+        <Acc title="Overlays" sum={ovs.length ? `${ovs.length} on clip` : "none"} defaultOpen={ovs.length > 0}>
+          {stale && (
+            <div className="ov-stale">
+              Overlays changed since the last render — the export is stale.
+              <button className="btn sm" disabled={busy}
+                onClick={() => void call(`/api/variants/${variant.id}/render`, "POST", { ratio: bRatio })
+                  .then(() => { setStale(false); setNote(`re-render queued (${RATIOS[bRatio].label})`); })}>
+                Re-render
+              </button>
+            </div>
+          )}
+          {ovs.map((o) => (
+            <div key={o.id} className="ovrow">
+              <textarea rows={2} value={o.text}
+                onChange={(e) => {
+                  patchOverlayLocal(o.id, { text: e.target.value });
+                  patchOverlayDebounced(o.id, { text: e.target.value });
+                }} />
+              <div className="ovmeta">
+                <select value={o.style} title="Style preset"
+                  onChange={(e) => {
+                    patchOverlayLocal(o.id, { style: e.target.value });
+                    const cfg = styleCfg(e.target.value) as { default_position?: string };
+                    if (cfg.default_position) patchOverlayLocal(o.id, { position: cfg.default_position });
+                    void patchOverlay(o.id, {
+                      style: e.target.value,
+                      ...(cfg.default_position ? { position: cfg.default_position } : {}),
+                    });
+                  }}>
+                  {overlayStyles.map((s) => <option key={s.key} value={s.key}>{s.name}</option>)}
+                </select>
+                <select value={o.position} title="Position"
+                  onChange={(e) => {
+                    patchOverlayLocal(o.id, { position: e.target.value });
+                    void patchOverlay(o.id, { position: e.target.value });
+                  }}>
+                  <option value="top">Top</option>
+                  <option value="center">Centre</option>
+                  <option value="lower_third">Lower third</option>
+                </select>
+                <span className="mono" style={{ fontSize: 10, color: "var(--muted)" }}>
+                  {o.start.toFixed(1)}–{o.end.toFixed(1)}s
+                </span>
+                <span style={{ flex: 1 }} />
+                <button className="btn ghost sm" disabled={suggesting}
+                  title="Three hook options from Claude, using this range's transcript and the video's creative tags"
+                  onClick={() => void suggestHook(o)}>
+                  {suggesting && suggestFor === o.id ? "…" : "Suggest hook"}
+                </button>
+                <button className="btn ghost sm" aria-label="Delete overlay"
+                  onClick={() => void delOverlay(o.id)}>✕</button>
+              </div>
+              {suggestFor === o.id && suggestions && (
+                <div className="ovsug">
+                  {suggestions.map((sg, i) => (
+                    <button key={i} className="ovsug-opt"
+                      onClick={() => {
+                        patchOverlayLocal(o.id, { text: sg.text });
+                        void patchOverlay(o.id, { text: sg.text });
+                        setSuggestFor(null);
+                      }}>
+                      <b>{sg.text}</b><span>{sg.angle}</span>
+                    </button>
+                  ))}
+                  <button className="btn ghost sm" onClick={() => setSuggestFor(null)}>dismiss</button>
+                </div>
+              )}
+            </div>
+          ))}
+          <button className="btn sm" onClick={() => void addOverlay()}>
+            + Overlay (first 3s)
+          </button>
+          <p style={{ fontSize: 10.5, color: "var(--muted)", margin: "6px 0 0" }}>
+            Drag the bar on the filmstrip to move it; drag its edges to
+            change the range. Overlays burn above subtitles and push them
+            out of the way when they collide.
+          </p>
         </Acc>
 
         <Acc title="Subtitles" sum={`${activePresetName} · ${S.fs}px`}>

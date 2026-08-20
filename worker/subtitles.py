@@ -78,10 +78,15 @@ def build_ass(
     preset: dict[str, Any],
     play_w: int,
     play_h: int,
+    vp_for=None,
 ) -> str:
     """One Dialogue event per word: the word's line is shown with the active
     word in the highlight colour. Event ends at the next word's start so the
-    line holds through inter-word gaps instead of flickering."""
+    line holds through inter-word gaps instead of flickering.
+
+    vp_for(start_s, end_s) -> fraction-of-height, when given, overrides the
+    preset's vertical position PER EVENT — how overlays push overlapping
+    subtitle lines out of their way (worker/overlays.subtitle_shift_for)."""
     cfg = {**DEFAULT_PRESET, **(preset or {})}
     wpl = max(1, int(cfg["wpl"]))
     # Prototype fs values are calibrated to a ~540px-wide preview at fs*0.5;
@@ -119,9 +124,10 @@ def build_ass(
                     parts.append(f"{{\\1c{hl}}}{text}{{\\1c&H00FFFFFF&}}")
                 else:
                     parts.append(text)
+            ev_y = round(play_h * vp_for(start, end)) if vp_for else y
             events.append(
                 f"Dialogue: 0,{_ts(start)},{_ts(end)},Caption,,0,0,0,,"
-                f"{{\\an5\\pos({x},{y})}}{' '.join(parts)}"
+                f"{{\\an5\\pos({x},{ev_y})}}{' '.join(parts)}"
             )
 
     style = (

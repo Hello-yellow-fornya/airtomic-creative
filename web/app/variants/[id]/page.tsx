@@ -14,13 +14,15 @@ export default async function VariantPage({
   const { id } = await params;
   const [variant] = await q<{
     id: string; label: string; name: string; status: string;
-    export_uri: string | null; clip_id: string; clip_name: string | null;
+    export_uri: string | null; render_stale: boolean;
+    clip_id: string; clip_name: string | null;
     clip_in: string; clip_out: string;
     subtitle_preset_id: string | null; subtitle_overrides: Record<string, unknown> | null;
     video_id: string; video_title: string | null; video_duration: string | null;
     src_w: number | null; src_h: number | null;
   }>(
     `SELECT cv.id::text, cv.label, cv.name, cv.status::text, cv.export_uri,
+            cv.render_stale,
             c.id::text AS clip_id, c.name AS clip_name,
             c.source_in_s::text AS clip_in, c.source_out_s::text AS clip_out,
             c.subtitle_preset_id::text, c.subtitle_overrides,
@@ -72,6 +74,17 @@ export default async function VariantPage({
     id: string; name: string; is_default: boolean; config: Record<string, unknown>;
   }>(
     "SELECT id::text, name, is_default, config FROM subtitle_presets ORDER BY is_default DESC, created_at",
+  );
+  const overlays = await q<{
+    id: string; idx: number; text: string; start_s: string; end_s: string;
+    position: string; style: string;
+  }>(
+    `SELECT id::text, idx, text, start_s::text, end_s::text, position, style
+     FROM clip_overlays WHERE variant_id = $1 ORDER BY idx`,
+    [id],
+  );
+  const overlayStyles = await q<{ key: string; name: string; config: Record<string, unknown> }>(
+    "SELECT key, name, config FROM overlay_style_presets ORDER BY created_at",
   );
 
   // Words for live captions + trim context: clip bounds ± 15s headroom.
@@ -145,6 +158,13 @@ export default async function VariantPage({
           }))}
           assets={assets}
           presets={presets}
+          overlays={overlays.map((o) => ({
+            id: o.id, text: o.text,
+            start: parseFloat(o.start_s), end: parseFloat(o.end_s),
+            position: o.position, style: o.style,
+          }))}
+          overlayStyles={overlayStyles}
+          renderStale={variant.render_stale}
           words={words.map((w) => ({
             w: w.word, s: parseFloat(w.start_s), e: parseFloat(w.end_s),
           }))}

@@ -28,6 +28,7 @@ import math
 import re
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
 from . import db, meta, r2
@@ -139,6 +140,57 @@ async function doUpload() {{
 """
 
 ROW = "<tr><td>{title}</td><td class='{cls}'>{status}</td><td>{detail}</td><td>{words}</td><td>{at}</td></tr>"
+
+
+_HOOK_SCHEMA = {
+    "type": "object", "additionalProperties": False, "required": ["options"],
+    "properties": {"options": {
+        "type": "array",
+        "items": {
+            "type": "object", "additionalProperties": False,
+            "required": ["text", "angle"],
+            "properties": {
+                "text": {"type": "string",
+                         "description": "The overlay text, max ~8 words, may use one \\n line break"},
+                "angle": {"type": "string",
+                          "description": "Two-word label for the approach, e.g. 'curiosity gap'"},
+            },
+        },
+    }},
+}
+
+
+def _suggest_hooks(cfg: Config, *, range_text: str, clip_text: str,
+                   tags) -> list[dict]:
+    import anthropic
+    client = anthropic.Anthropic(api_key=cfg.anthropic_api_key)
+    tag_block = ""
+    if tags:
+        tag_block = (f"\nCreative tags — universal: {json.dumps(tags['universal'])}"
+                     f"\nbrand: {json.dumps(tags['brand'])}")
+    prompt = (
+        "You write text-overlay hooks for Klira (klira.skin), UK "
+        "prescription skincare. A hook is on-screen text over the first "
+        "seconds of a vertical ad: short, concrete, scroll-stopping. Never "
+        "make treatment or medical claims (UK POM rules) — curiosity, "
+        "questions and specifics beat claims.\n\n"
+        f"The clip says: \"{clip_text[:1500]}\"\n"
+        f"The overlay covers the part saying: \"{range_text[:400]}\"{tag_block}\n\n"
+        "Give exactly 3 hook options with distinct angles."
+    )
+    extra: dict[str, Any] = {}
+    if cfg.anthropic_model.startswith(("claude-opus-5", "claude-fable-5", "claude-mythos")):
+        extra = {"betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"}
+    resp = client.beta.messages.create(
+        model=cfg.anthropic_model, max_tokens=1000,
+        messages=[{"role": "user", "content": prompt}],
+        output_config={"format": {"type": "json_schema", "schema": _HOOK_SCHEMA}},
+        **extra,
+    )
+    if resp.stop_reason == "refusal":
+        raise RuntimeError("claude declined the request")
+    text = next((b.text for b in resp.content if b.type == "text"), None)
+    return json.loads(text)["options"][:3]
 
 
 def make_server(cfg: Config) -> ThreadingHTTPServer:
@@ -373,6 +425,9 @@ def make_server(cfg: Config) -> ThreadingHTTPServer:
 
         def do_POST(self):
             path = urlparse(self.path).path
+            if path == "/overlay/suggest":
+                self._overlay_suggest()
+                return
             if path == "/upload/start":
                 self._upload_start()
                 return
@@ -417,6 +472,81 @@ def make_server(cfg: Config) -> ThreadingHTTPServer:
             self._respond(
                 303, "", {"Location": f"/?key={quote(key)}&queued={video_id}"}
             )
+
+        def _overlay_suggest(self):
+            """Three hook options for an overlay's time range: one Claude
+            call with the transcript slice plus the video's creative tags —
+            the same context the tagging pipeline already holds. The range
+            is clip-relative and mapped linearly onto the clip's source
+            window (approximate for reordered/lifted scenes; the words a
+            hook needs are the ones at the top of the clip either way)."""
+            body = self._read_json()
+            if not authed(str(body.get("key", ""))):
+                self._json(401, {"error": "unauthorised"})
+                return
+            if not cfg.anthropic_api_key:
+                self._json(409, {"error": "ANTHROPIC_API_KEY not set on the worker"})
+                return
+            variant_id = str(body.get("variant_id", ""))
+            try:
+                start_rel = float(body.get("start_s", 0))
+                end_rel = float(body.get("end_s", 3))
+            except (TypeError, ValueError):
+                self._json(400, {"error": "bad time range"})
+                return
+            try:
+                with db.connect(cfg.database_url) as conn:
+                    row = conn.execute(
+                        """
+                        SELECT c.video_id, c.source_in_s, c.source_out_s
+                        FROM clip_variants v JOIN clips c ON c.id = v.clip_id
+                        WHERE v.id = %s
+                        """, (variant_id,),
+                    ).fetchone()
+                    if row is None:
+                        self._json(404, {"error": "variant not found"})
+                        return
+                    s0 = float(row["source_in_s"]) + max(0.0, start_rel)
+                    s1 = min(float(row["source_in_s"]) + end_rel,
+                             float(row["source_out_s"]))
+                    words = conn.execute(
+                        """
+                        SELECT w.word FROM transcript_words w
+                        JOIN transcripts t ON t.id = w.transcript_id
+                        WHERE t.video_id = %s AND w.end_s > %s AND w.start_s < %s
+                        ORDER BY w.idx LIMIT 120
+                        """, (row["video_id"], s0, s1),
+                    ).fetchall()
+                    clip_words = conn.execute(
+                        """
+                        SELECT w.word FROM transcript_words w
+                        JOIN transcripts t ON t.id = w.transcript_id
+                        WHERE t.video_id = %s AND w.end_s > %s AND w.start_s < %s
+                        ORDER BY w.idx LIMIT 400
+                        """, (row["video_id"], float(row["source_in_s"]),
+                              float(row["source_out_s"])),
+                    ).fetchall()
+                    tags = conn.execute(
+                        "SELECT universal, brand FROM creative_tags "
+                        "WHERE video_id = %s ORDER BY created_at DESC LIMIT 1",
+                        (row["video_id"],),
+                    ).fetchone()
+            except Exception:
+                log.exception("overlay suggest lookup failed")
+                self._json(500, {"error": "db error"})
+                return
+            try:
+                options = _suggest_hooks(
+                    cfg,
+                    range_text=" ".join(w["word"] for w in words),
+                    clip_text=" ".join(w["word"] for w in clip_words),
+                    tags=tags,
+                )
+            except Exception as exc:
+                log.exception("overlay suggest failed")
+                self._json(502, {"error": str(exc)[:300]})
+                return
+            self._json(200, {"options": options})
 
         def _upload_start(self):
             body = self._read_json()

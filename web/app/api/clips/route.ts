@@ -35,11 +35,21 @@ export async function POST(req: Request) {
     const preset = await client.query(
       "SELECT id FROM subtitle_presets WHERE is_default ORDER BY created_at LIMIT 1",
     );
+    // Default name: "<source short name> · <start>s–<end>s" — never
+    // "untitled clip". Long source names middle-truncate to stay readable.
+    let clipName = name;
+    if (!clipName) {
+      const src = await client.query(
+        "SELECT title FROM videos WHERE id = $1", [videoId]);
+      const t: string = src.rows[0]?.title ?? "untitled source";
+      const short = t.length > 24 ? `${t.slice(0, 14)}…${t.slice(-6)}` : t;
+      clipName = `${short} · ${startS.toFixed(0)}s–${endS.toFixed(0)}s`;
+    }
     const clip = await client.query(
       `INSERT INTO clips (video_id, name, source_in_s, source_out_s, subtitle_preset_id,
                           candidate_id, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, 'web') RETURNING id`,
-      [videoId, name, startS, endS, preset.rows[0]?.id ?? null, candidateId],
+      [videoId, clipName, startS, endS, preset.rows[0]?.id ?? null, candidateId],
     );
     if (candidateId) {
       await client.query(
