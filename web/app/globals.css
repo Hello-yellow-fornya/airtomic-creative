@@ -973,7 +973,7 @@ table.lib-list tbody tr{cursor:pointer}
 table.lib-list tbody tr:hover td{background:var(--paper)}
 
 /* Clip builder workbench: variant rows + selection-driven editor. */
-.wb-table{overflow:auto;max-height:clamp(140px,20vh,240px)}
+.wb-table{overflow:auto;max-height:clamp(140px,18vh,200px)}
 tr.wb-row{cursor:pointer}
 tr.wb-row td{border-left:2px solid transparent}
 tr.wb-row td:first-child{border-left:3px solid var(--line)}
