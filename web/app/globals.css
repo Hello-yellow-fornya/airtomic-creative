@@ -1062,3 +1062,27 @@ table.lib-list tbody tr:hover td{background:var(--paper)}
   linear-gradient(45deg,#C9C6BE 25%,transparent 25%,transparent 75%,#C9C6BE 75%),
   linear-gradient(45deg,#C9C6BE 25%,#F4F3F0 25%,#F4F3F0 75%,#C9C6BE 75%);
   background-size:8px 8px;background-position:0 0,4px 4px}
+
+/* Colour picker */
+.cpk{margin-top:8px;padding:8px;border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--surface);max-width:220px}
+.cpk-sq{position:relative;width:100%;height:110px;border-radius:4px;cursor:crosshair;
+  touch-action:none}
+.cpk-dot{position:absolute;width:11px;height:11px;border:2px solid #fff;border-radius:50%;
+  transform:translate(-50%,-50%);box-shadow:0 0 0 1px rgba(0,0,0,.5);pointer-events:none}
+.cpk-hue{position:relative;height:12px;margin-top:8px;border-radius:6px;cursor:crosshair;
+  touch-action:none;
+  background:linear-gradient(to right,#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)}
+.cpk-hue-dot{position:absolute;top:50%;width:6px;height:16px;border-radius:3px;
+  background:#fff;border:1px solid rgba(0,0,0,.4);transform:translate(-50%,-50%);
+  pointer-events:none}
+.cpk-row{display:flex;align-items:center;gap:6px;margin-top:8px}
+.cpk-chip{width:22px;height:22px;border-radius:4px;border:1px solid var(--line);flex:none}
+.cpk-hex{width:76px;padding:3px 6px;font-size:11px;border:1px solid var(--line);
+  border-radius:3px;background:var(--paper)}
+.cpk-hex.bad{border-color:#B00020;color:#B00020}
+.cpk-eye{white-space:nowrap;font-size:10px !important;padding:3px 7px !important}
+.cpk-recent{margin-top:8px;padding-top:7px;border-top:1px dashed var(--line)}
+.sw.rainbow{background:conic-gradient(#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)}
+.eyedrop-layer{position:absolute;inset:0;z-index:60;cursor:crosshair;
+  outline:2px dashed var(--signal);outline-offset:-2px}

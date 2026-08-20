@@ -160,3 +160,12 @@ def test_zero_opacity_background_never_pushes():
     # burn: alpha byte on BackColour (0.0 -> FF fully transparent)
     ass = build_overlay_ass([ghost], {}, "9x16", 1080, 1920, 10)
     assert "&HFF0D0B0A&" in ass
+
+
+def test_hex_to_ass_bgr_conversion():
+    # ASS stores colours as &HAABBGGRR — a picked colour must land with
+    # channels swapped: #3A7BD5 (R=3A G=7B B=D5) -> BBGGRR = D57B3A
+    ov = OV(sv=SV(vp=50, color="#3A7BD5", bg="none", ol=3, ol_color="#10FF20"))
+    ass = build_overlay_ass([ov], {}, "9x16", 1080, 1920, 10)
+    assert "&H00D57B3A&" in ass          # PrimaryColour, BGR order
+    assert "&H0020FF10&" in ass          # OutlineColour, BGR order

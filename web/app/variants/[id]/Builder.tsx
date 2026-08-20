@@ -14,6 +14,7 @@ import {
   useCallback, useEffect, useMemo, useRef, useState,
 } from "react";
 import { useRouter } from "next/navigation";
+import ColorPicker from "./ColorPicker";
 
 type VariantInfo = {
   id: string; label: string; name: string; status: string;
@@ -43,6 +44,7 @@ export type OvSv = {
   pr?: Record<string, OvPlacement>;
   color: string; bg: "none" | "pill" | "box"; bg_color: string;
   bg_alpha: number; caps: boolean; weight: number;
+  ol_color?: string;
 };
 type Ov = {
   id: string; text: string; start: number; end: number;
@@ -128,7 +130,7 @@ type Style = {
   fs: number; ol: number; vp: number; wpl: number; hl: string;
   caps: boolean; box: boolean;
   color: string; bg: "none" | "pill" | "box"; bgColor: string;
-  bgAlpha: number;
+  bgAlpha: number; olColor: string;
 };
 
 // Brand palette for the Text style panel swatches.
@@ -223,6 +225,7 @@ export default function Builder({
       color: String(c.color ?? "#FFFFFF"), bg,
       bgColor: String(c.bg_color ?? "#000000"),
       bgAlpha: Number(c.bg_alpha ?? 0.62),
+      olColor: String(c.ol_color ?? "#000000"),
     };
   };
   const [S, setS] = useState<Style>(seedStyle);
@@ -327,6 +330,40 @@ export default function Builder({
   }
   function patchPlace(o: Ov, patch: Partial<OvPlacement>) {
     patchSv(o, svWithPlace(o, patch));
+  }
+
+  // ----- eyedropper: sample a pixel from the preview frame -----
+  const [eyedrop, setEyedrop] = useState<((hex: string) => void) | null>(null);
+  const startEyedrop = useCallback((apply: (hex: string) => void) => {
+    setEyedrop(() => apply);
+  }, []);
+  function sampleFrame(e: React.PointerEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const apply = eyedrop;
+    setEyedrop(null);
+    const v = videoRef.current;
+    const box = srcRef.current;
+    if (!apply || !v || !box || !v.videoWidth) {
+      setNote("nothing to sample — the video isn't loaded");
+      return;
+    }
+    try {
+      const r = box.getBoundingClientRect();
+      const sx = Math.floor(((e.clientX - r.left) / r.width) * v.videoWidth);
+      const sy = Math.floor(((e.clientY - r.top) / r.height) * v.videoHeight);
+      const canvas = document.createElement("canvas");
+      canvas.width = 1;
+      canvas.height = 1;
+      const g = canvas.getContext("2d")!;
+      g.drawImage(v, sx, sy, 1, 1, 0, 0, 1, 1);
+      const d = g.getImageData(0, 0, 1, 1).data;
+      const hex = `#${[d[0], d[1], d[2]]
+        .map((n) => n.toString(16).padStart(2, "0")).join("")}`.toUpperCase();
+      apply(hex);
+    } catch {
+      setNote("couldn't sample — the source blocked canvas access");
+    }
   }
 
   // ----- drag / resize a selected overlay in the preview -----
@@ -1027,7 +1064,9 @@ export default function Builder({
     const ov = { ...styleOv };
     for (const [k, v] of Object.entries(patch)) {
       if (k === "box") continue;              // superseded by bg
-      const key = k === "bgColor" ? "bg_color" : k === "bgAlpha" ? "bg_alpha" : k;
+      const key = k === "bgColor" ? "bg_color"
+        : k === "bgAlpha" ? "bg_alpha"
+        : k === "olColor" ? "ol_color" : k;
       ov[key] = v;
     }
     setStyleOv(ov);
@@ -1046,6 +1085,7 @@ export default function Builder({
       color: String(c.color ?? "#FFFFFF"), bg,
       bgColor: String(c.bg_color ?? "#000000"),
       bgAlpha: Number(c.bg_alpha ?? 0.62),
+      olColor: String(c.ol_color ?? "#000000"),
     });
     persistStyle({}, fixes, p.id);
   }
@@ -1214,6 +1254,7 @@ export default function Builder({
               <video
                 ref={videoRef}
                 src={`/api/media/${variant.videoId}`}
+                crossOrigin="anonymous"
                 preload="metadata"
                 playsInline
                 onLoadedMetadata={() => { if (videoRef.current) videoRef.current.currentTime = IN + t; }}
@@ -1244,7 +1285,7 @@ export default function Builder({
                 top: `${subVpWithOverlays(t, t + 0.4, ovs, bRatio, S.vp / 100, ovHasBg) * 100}%`,
                 transform: "translateY(-50%)",
                 textShadow: S.ol
-                  ? `0 0 ${S.ol}px #000,0 0 ${S.ol}px #000,0 ${S.ol / 2}px ${S.ol}px rgba(0,0,0,.6)`
+                  ? `0 0 ${S.ol}px ${S.olColor},0 0 ${S.ol}px ${S.olColor},0 ${S.ol / 2}px ${S.ol}px rgba(0,0,0,.6)`
                   : "none",
                 ...(S.bg !== "none"
                   ? { background: `${S.bgColor}${Math.round(Math.max(0, Math.min(1, S.bgAlpha)) * 255).toString(16).padStart(2, "0")}`,
@@ -1298,7 +1339,7 @@ export default function Builder({
                     overflowWrap: "break-word",
                     color: cfg.color,
                     textShadow: cfg.bg === "none" && cfg.ol
-                      ? `0 0 ${cfg.ol}px #000,0 0 ${cfg.ol}px #000` : undefined,
+                      ? `0 0 ${cfg.ol}px ${cfg.ol_color ?? "#000"},0 0 ${cfg.ol}px ${cfg.ol_color ?? "#000"}` : undefined,
                     ...(cfg.bg !== "none" ? {
                       background: `${cfg.bg_color}${Math.round(cfg.bg_alpha * 255).toString(16).padStart(2, "0")}`,
                       padding: "4px 10px",
@@ -1320,6 +1361,10 @@ export default function Builder({
                 </div>
               );
             })}
+            {eyedrop && (
+              <div className="eyedrop-layer" title="Click to sample this pixel"
+                onPointerDown={sampleFrame} />
+            )}
             {/* drag guides: centre lines + the ratio's safe-zone edges */}
             {ovDrag && (
               <>
@@ -1770,35 +1815,26 @@ export default function Builder({
                     ))}
                   </div>
                 </div>
-                <div className="ctrl">
-                  <label>Text colour</label>
-                  <div className="swatches">
-                    {TEXT_COLORS.map((c) => (
-                      <button key={c} className="sw" style={{ background: c }}
-                        data-on={tv.color.toUpperCase() === c ? "1" : undefined}
-                        aria-label={`Text ${c}`}
-                        onClick={() => patchSv(targetOv, { color: c })} />
-                    ))}
-                  </div>
-                </div>
+                <ColorControl label="Text colour" value={tv.color}
+                  swatches={TEXT_COLORS} onEyedrop={startEyedrop}
+                  onPick={(h) => patchSv(targetOv, { color: h })} />
+                {tv.bg === "none" && (
+                  <ColorControl label="Outline colour" value={tv.ol_color ?? "#000000"}
+                    swatches={OUTLINE_COLORS} onEyedrop={startEyedrop}
+                    onPick={(h) => patchSv(targetOv, { ol_color: h })} />
+                )}
                 {tv.bg !== "none" && (
                   <>
-                    <div className="ctrl">
-                      <label>Background colour</label>
-                      <div className="swatches">
-                        {BG_COLORS.map((c) => (
-                          <button key={c} className="sw" style={{ background: c }}
-                            data-on={tv.bg_color.toUpperCase() === c.toUpperCase() && tv.bg_alpha > 0 ? "1" : undefined}
-                            aria-label={`Background ${c}`}
-                            onClick={() => patchSv(targetOv, { bg_color: c })} />
-                        ))}
+                    <ColorControl label="Background colour" value={tv.bg_color}
+                      swatches={BG_COLORS} onEyedrop={startEyedrop}
+                      onPick={(h) => patchSv(targetOv, { bg_color: h })}
+                      extra={
                         <button className="sw transparent"
                           data-on={tv.bg_alpha === 0 ? "1" : undefined}
                           title="Transparent — keeps the box geometry, so subtitle push-down turns off without losing the layout"
                           aria-label="Background transparent"
                           onClick={() => patchSv(targetOv, { bg_alpha: 0 })} />
-                      </div>
-                    </div>
+                      } />
                     <div className="ctrl">
                       <label htmlFor="ovba">Opacity <b>{Math.round(tv.bg_alpha * 100)}%</b></label>
                       <input id="ovba" type="range" min={0} max={100}
@@ -1860,35 +1896,26 @@ export default function Builder({
                   ))}
                 </div>
               </div>
-              <div className="ctrl">
-                <label>Text colour</label>
-                <div className="swatches">
-                  {TEXT_COLORS.map((c) => (
-                    <button key={c} className="sw" style={{ background: c }}
-                      data-on={S.color.toUpperCase() === c ? "1" : undefined}
-                      aria-label={`Text ${c}`}
-                      onClick={() => setStyle({ color: c })} />
-                  ))}
-                </div>
-              </div>
+              <ColorControl label="Text colour" value={S.color}
+                swatches={TEXT_COLORS} onEyedrop={startEyedrop}
+                onPick={(h) => setStyle({ color: h })} />
+              {S.bg === "none" && (
+                <ColorControl label="Outline colour" value={S.olColor}
+                  swatches={OUTLINE_COLORS} onEyedrop={startEyedrop}
+                  onPick={(h) => setStyle({ olColor: h })} />
+              )}
               {S.bg !== "none" && (
                 <>
-                  <div className="ctrl">
-                    <label>Background colour</label>
-                    <div className="swatches">
-                      {BG_COLORS.map((c) => (
-                        <button key={c} className="sw" style={{ background: c }}
-                          data-on={S.bgColor.toUpperCase() === c.toUpperCase() && S.bgAlpha > 0 ? "1" : undefined}
-                          aria-label={`Background ${c}`}
-                          onClick={() => setStyle({ bgColor: c })} />
-                      ))}
+                  <ColorControl label="Background colour" value={S.bgColor}
+                    swatches={BG_COLORS} onEyedrop={startEyedrop}
+                    onPick={(h) => setStyle({ bgColor: h })}
+                    extra={
                       <button className="sw transparent"
                         data-on={S.bgAlpha === 0 ? "1" : undefined}
                         title="Transparent background"
                         aria-label="Background transparent"
                         onClick={() => setStyle({ bgAlpha: 0 })} />
-                    </div>
-                  </div>
+                    } />
                   <div className="ctrl">
                     <label htmlFor="subba">Opacity <b>{Math.round(S.bgAlpha * 100)}%</b></label>
                     <input id="subba" type="range" min={0} max={100}
@@ -1946,6 +1973,37 @@ export default function Builder({
           </p>
         )}
       </div>
+    </div>
+  );
+}
+
+const OUTLINE_COLORS = ["#000000", "#FFFFFF", "#FFC629", "#14403C"];
+
+/** One colour control: brand swatches, then a rainbow toggle that opens
+ * the full picker (SB square, hue, hex, eyedropper, recent colours). */
+function ColorControl({ label, value, swatches, extra, onPick, onEyedrop }: {
+  label: string; value: string; swatches: string[];
+  extra?: React.ReactNode;
+  onPick: (hex: string) => void;
+  onEyedrop?: (apply: (hex: string) => void) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="ctrl">
+      <label>{label}</label>
+      <div className="swatches">
+        {swatches.map((c) => (
+          <button key={c} className="sw" style={{ background: c }}
+            data-on={value.toUpperCase() === c.toUpperCase() ? "1" : undefined}
+            aria-label={`${label} ${c}`}
+            onClick={() => onPick(c.toUpperCase())} />
+        ))}
+        {extra}
+        <button className="sw rainbow" data-on={open ? "1" : undefined}
+          title="Custom colour…" aria-label={`${label} custom`}
+          onClick={() => setOpen((o) => !o)} />
+      </div>
+      {open && <ColorPicker value={value} onPick={onPick} onEyedrop={onEyedrop} />}
     </div>
   );
 }

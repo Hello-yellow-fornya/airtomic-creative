@@ -27,6 +27,7 @@ export type Sv = {
   pr?: Record<string, Placement>;
   color: string; bg: "none" | "pill" | "box"; bg_color: string;
   bg_alpha: number; caps: boolean; weight: number;
+  ol_color?: string;
 };
 
 const RATIO_KEYS = ["9x16", "4x5", "1x1", "1.91x1"];
@@ -64,9 +65,10 @@ export function sanitizeSv(raw: unknown): Sv | null {
     w: clamp(Number(r.w ?? 80) || 80, 10, 100),
     ...(pr ? { pr } : {}),
     wpl: r.wpl == null ? null : clamp(Math.round(Number(r.wpl)) || 3, 1, 8),
-    color: HEX.test(String(r.color)) ? String(r.color) : "#FFFFFF",
+    color: HEX.test(String(r.color)) ? String(r.color).toUpperCase() : "#FFFFFF",
     bg,
-    bg_color: HEX.test(String(r.bg_color)) ? String(r.bg_color) : "#0A0B0D",
+    bg_color: HEX.test(String(r.bg_color)) ? String(r.bg_color).toUpperCase() : "#0A0B0D",
+    ol_color: HEX.test(String(r.ol_color)) ? String(r.ol_color).toUpperCase() : "#000000",
     bg_alpha: clamp(Number(r.bg_alpha ?? 0.75), 0, 1),
     caps: !!r.caps,
     weight: clamp(Math.round(Number(r.weight) || 800), 400, 900),

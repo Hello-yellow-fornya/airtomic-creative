@@ -73,6 +73,7 @@ DEFAULT_PRESET = {
     # Text-style panel additions (0017): base text colour and background.
     # "bg" supersedes the legacy box boolean: none | pill | box.
     "color": "#FFFFFF", "bg": None, "bg_color": "#000000", "bg_alpha": 0.62,
+    "ol_color": "#000000",
 }
 
 
@@ -138,9 +139,10 @@ def build_ass(
                 f"{{\\an5\\pos({x},{ev_y})}}{' '.join(parts)}"
             )
 
+    ol_col = _ass_colour(str(cfg.get("ol_color") or "#000000"))
     style = (
         f"Style: Caption,{cfg['font']},{fontsize},{base},{base},"
-        f"&H00000000,{back},-1,0,0,0,100,100,0,0,"
+        f"{ol_col},{back},-1,0,0,0,100,100,0,0,"
         f"{border_style},{outline_val},0,5,0,0,0,1"
     )
 

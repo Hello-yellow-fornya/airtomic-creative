@@ -67,6 +67,7 @@ def resolve_cfg(ov: dict[str, Any],
             "pr": sv.get("pr") or {},
             "wpl": int(sv["wpl"]) if sv.get("wpl") else None,
             "color": str(sv.get("color", "#FFFFFF")),
+            "ol_color": str(sv.get("ol_color", "#000000")),
             "bg": str(sv.get("bg", "none")),
             "bg_color": str(sv.get("bg_color", "#0A0B0D")),
             "bg_alpha": float(sv.get("bg_alpha", 0.75)),
@@ -85,6 +86,7 @@ def resolve_cfg(ov: dict[str, Any],
         "w": 80.0,
         "pr": {},
         "color": str(cfg["color"]),
+        "ol_color": "#000000",
         "bg": "pill" if cfg.get("box") else "none",
         "bg_color": str(cfg.get("box_color", "#0A0B0D")),
         "bg_alpha": float(cfg.get("box_alpha", 0.75)),
@@ -180,14 +182,16 @@ def build_overlay_ass(
         if cfg["bg"] in ("pill", "box"):
             border_style = 3
             back = _ass_colour(cfg["bg_color"], cfg["bg_alpha"])
-            outline_val = pad  # BorderStyle 3: Outline is the box padding
+            outline_col = back  # BorderStyle 3: outline colour IS the box
+            outline_val = pad   # ...and Outline is the box padding
         else:
             border_style = 1
             back = "&H9E000000&"
+            outline_col = _ass_colour(cfg["ol_color"])
             outline_val = max(0, round(cfg["ol"] * play_w / 1080)) or 2
         style_lines.append(
             f"Style: {name},{cfg['font']},{fontsize},{primary},{primary},"
-            f"{back},{back},{-1 if cfg['weight'] >= 600 else 0},0,0,0,100,100,0,0,"
+            f"{outline_col},{back},{-1 if cfg['weight'] >= 600 else 0},0,0,0,100,100,0,0,"
             f"{border_style},{outline_val},0,5,0,0,0,1"
         )
         start = max(0.0, float(ov["start_s"]))
