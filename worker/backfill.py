@@ -231,6 +231,42 @@ def fetch_video_to_r2(client: MetaClient, s3, bucket: str,
     return r2.make_uri(bucket, key), node.get("title"), _float(node.get("length"))
 
 
+def merge_rows(rows: list[dict]) -> list[dict]:
+    """The video_asset breakdown can emit several rows for one
+    (ad, video) pair — the same video registered under different
+    placement-asset labels. An upsert keyed (ad_id, meta_video_id) would
+    keep whichever row landed last and silently drop the rest (observed:
+    £69k of spend across 90 pairs), so duplicates are summed here first.
+    Additive raw counts sum; a count missing from every duplicate stays
+    NULL (never zero); reach is NOT additive across rows (deduplicated
+    people), so merged pairs carry NULL reach; dates take the widest
+    span."""
+    SUM_KEYS = ("impressions", "video_3s_views", "video_15s_views",
+                "thruplays", "video_p25", "video_p50", "video_p75",
+                "video_p100", "link_clicks", "spend", "purchases",
+                "purchase_value")
+    out: dict[tuple, dict] = {}
+    for r in rows:
+        key = (r["ad_id"], r["meta_video_id"])
+        cur = out.get(key)
+        if cur is None:
+            out[key] = dict(r)
+            continue
+        for k in SUM_KEYS:
+            a, b = cur.get(k), r.get(k)
+            if a is None and b is None:
+                continue
+            cur[k] = (a or 0) + (b or 0)
+        cur["reach"] = None
+        if r.get("date_start") and (not cur.get("date_start")
+                                    or r["date_start"] < cur["date_start"]):
+            cur["date_start"] = r["date_start"]
+        if r.get("date_stop") and (not cur.get("date_stop")
+                                   or r["date_stop"] > cur["date_stop"]):
+            cur["date_stop"] = r["date_stop"]
+    return list(out.values())
+
+
 def build_plan(client: MetaClient, since: str | None, until: str | None,
                limit: int | None) -> dict[str, Any]:
     """All the Meta reads: returns rows to write, videos to fetch, and the
@@ -248,7 +284,7 @@ def build_plan(client: MetaClient, since: str | None, until: str | None,
     bd = [r for r in bd if (r.get("video_asset") or {}).get("video_id")
           and (not limit or r.get("ad_id") in ad_ids)]
     bd_ads = {r["ad_id"] for r in bd}
-    rows = [breakdown_row(r) for r in bd]
+    rows = merge_rows([breakdown_row(r) for r in bd])
 
     log.info("pulling plain ad-level insights (legacy single-video ads)…")
     plain = client.insights_ad_level(since=since, until=until)

@@ -124,6 +124,44 @@ def test_breakdown_unavailable_metrics_stay_null():
         assert row[k] is None
 
 
+def test_merge_rows_sums_duplicate_pairs():
+    from worker.backfill import merge_rows
+    a = breakdown_row(BREAKDOWN_INSIGHT)                       # spend 32.7555
+    b = breakdown_row({**BREAKDOWN_INSIGHT, "spend": "5859.79",
+                       "impressions": "397830",
+                       "actions": [{"action_type": "video_view", "value": "1000"}]})
+    merged = merge_rows([a, b])
+    assert len(merged) == 1
+    m = merged[0]
+    assert abs(m["spend"] - (32.7555 + 5859.79)) < 1e-6       # not last-write-wins
+    assert m["impressions"] == 1850 + 397830
+    assert m["video_3s_views"] == 568 + 1000
+    assert m["purchases"] == 2                                # None in b → keeps a
+    assert m["reach"] is None                                 # not additive
+    # null-in-all stays null, never zero
+    assert m["thruplays"] is None
+
+
+def test_merge_rows_distinct_pairs_untouched():
+    from worker.backfill import merge_rows
+    a = breakdown_row(BREAKDOWN_INSIGHT)
+    other = breakdown_row({**BREAKDOWN_INSIGHT, "ad_id": "a10"})
+    merged = merge_rows([a, other])
+    assert len(merged) == 2
+    assert {m["ad_id"] for m in merged} == {"a9", "a10"}
+    assert all(m["spend"] == 32.7555 for m in merged)
+
+
+def test_merge_rows_widens_date_span():
+    from worker.backfill import merge_rows
+    a = breakdown_row({**BREAKDOWN_INSIGHT,
+                       "date_start": "2024-05-01", "date_stop": "2025-01-01"})
+    b = breakdown_row({**BREAKDOWN_INSIGHT,
+                       "date_start": "2023-07-20", "date_stop": "2026-08-19"})
+    m = merge_rows([a, b])[0]
+    assert (m["date_start"], m["date_stop"]) == ("2023-07-20", "2026-08-19")
+
+
 def test_breakdown_row_parses_both_names():
     parts = breakdown_row(BREAKDOWN_INSIGHT)["name_parts"]
     assert parts["ad"]["funnel_stage"] == "UF"
