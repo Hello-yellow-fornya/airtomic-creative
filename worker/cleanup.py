@@ -23,7 +23,7 @@ log = logging.getLogger("worker.cleanup")
 # only per-id object families are deletable, and the id must be present.
 _UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 _ALLOWED = re.compile(
-    rf"^(exports/{_UUID}/|assets/{_UUID}/|sources/{_UUID}/|audio/{_UUID}\.wav)$"
+    rf"^(exports/{_UUID}/|assets/{_UUID}/|sources/{_UUID}/|keyframes/{_UUID}/|audio/{_UUID}\.wav)$"
 )
 
 

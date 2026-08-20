@@ -34,6 +34,15 @@ class IngestError(Exception):
     pass
 
 
+def _sha256(path: str) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def handle(conn: psycopg.Connection, cfg: Config, s3, job: dict[str, Any]) -> None:
     video_id = job["payload"].get("video_id")
     if not video_id:
@@ -67,6 +76,12 @@ def handle(conn: psycopg.Connection, cfg: Config, s3, job: dict[str, Any]) -> No
             bucket, key = r2.parse_uri(storage_uri)
             src_path = str(Path(tmp) / Path(key).name)
             r2.download_file(s3, bucket, key, src_path)
+
+        content_hash = _sha256(src_path)
+        conn.execute(
+            "UPDATE videos SET content_hash = %s WHERE id = %s",
+            (content_hash, video_id),
+        )
 
         meta = media.probe(src_path)
         conn.execute(

@@ -103,6 +103,12 @@ def create_video_and_ingest_job(
             """,
             (video_id, source, title, storage_uri, uploaded_by, meta_video_id),
         ).fetchone()
+        if meta_video_id:
+            conn.execute(
+                """INSERT INTO video_meta_links (meta_video_id, video_id)
+                   VALUES (%s, %s) ON CONFLICT (meta_video_id) DO NOTHING""",
+                (meta_video_id, row["id"]),
+            )
         job_id = enqueue_job(conn, "ingest", {"video_id": str(row["id"])})
     return str(row["id"]), job_id
 

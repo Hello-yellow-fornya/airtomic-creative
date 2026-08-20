@@ -16,7 +16,7 @@ import time
 import traceback
 
 from . import (
-    backfill, cleanup, config, db, ingest, pipeline, r2, recommend, render,
+    backfill, cleanup, config, db, hashes, ingest, pipeline, r2, recommend, render,
     scene_detect, tag, webapp,
 )
 
@@ -30,6 +30,7 @@ HANDLERS = {
     "render": render.handle,
     "cleanup": cleanup.handle,
     "backfill": backfill.handle,
+    "hash_backfill": hashes.handle,
 }
 # Every ingest-pipeline stage shares one failure hook: mark the video failed.
 # Render failures stay on the job row (the variant has no failed state).

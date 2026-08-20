@@ -24,10 +24,10 @@ export async function PATCH(
   return NextResponse.json({ ok: true });
 }
 
-/** Dismiss a FAILED ingest: delete the video row (nothing downstream
- * exists for a failed pipeline) and clean its archived source + extracted
- * audio out of R2 via the worker's cleanup job. Refuses any other status —
- * healthy videos are deleted through their clips, or not at all. */
+/** Delete a source: remove the video row (transcripts / scenes / tags /
+ * candidates cascade) and clean its source, keyframes and audio out of R2
+ * via the worker's cleanup job. Refuses when clips still reference it —
+ * delete those first (or merge). Failed ingests always qualify. */
 export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -40,17 +40,19 @@ export async function DELETE(
   try {
     await client.query("BEGIN");
     const cur = await client.query(
-      "SELECT status::text, storage_uri FROM videos WHERE id = $1",
+      "SELECT status::text, storage_uri FROM videos WHERE id = $1 FOR UPDATE",
       [id],
     );
     if (!cur.rowCount) {
       await client.query("ROLLBACK");
       return NextResponse.json({ error: "not found" }, { status: 404 });
     }
-    if (cur.rows[0].status !== "failed") {
+    const clips = await client.query(
+      "SELECT count(*)::int AS n FROM clips WHERE video_id = $1", [id]);
+    if (clips.rows[0].n > 0) {
       await client.query("ROLLBACK");
       return NextResponse.json(
-        { error: "only failed ingests can be dismissed" },
+        { error: `${clips.rows[0].n} clip(s) still reference this source — delete them first` },
         { status: 409 },
       );
     }
@@ -58,8 +60,8 @@ export async function DELETE(
     await client.query(
       `INSERT INTO jobs (type, payload)
        VALUES ('cleanup', jsonb_build_object('r2_prefixes',
-               jsonb_build_array($1::text, $2::text)))`,
-      [`sources/${id}/`, `audio/${id}.wav`],
+               jsonb_build_array($1::text, $2::text, $3::text)))`,
+      [`sources/${id}/`, `keyframes/${id}/`, `audio/${id}.wav`],
     );
     await client.query("COMMIT");
     return NextResponse.json({ ok: true });
