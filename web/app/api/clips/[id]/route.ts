@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { pool, q } from "@/lib/db";
+import { markStaleForClip } from "@/lib/variants";
 
 export const dynamic = "force-dynamic";
 
-/** Clip-level settings: name, trim bounds, subtitle preset + overrides.
+/** Clip-level settings — since 0015 that is ONLY the shared source range.
+ * Names and subtitle settings live on the variant (PATCH /api/variants).
  * Trimming stretches the first/last source scene of EVERY variant of the
  * clip to the new bounds (the prototype's handle-drag behaviour), all in
- * one transaction. Subtitle overrides merge over the preset at render time
- * (worker/render.py), so what's saved here is what ships. */
+ * one transaction, and marks every variant's render stale. */
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -28,19 +29,6 @@ export async function PATCH(
     const sets: string[] = [];
     const vals: unknown[] = [];
     let n = 1;
-    if (body.name !== undefined) {
-      sets.push(`name = $${n++}`);
-      vals.push(body.name || null);
-    }
-    if (body.subtitle_preset_id !== undefined) {
-      sets.push(`subtitle_preset_id = $${n++}`);
-      vals.push(body.subtitle_preset_id || null);
-    }
-    if (body.subtitle_overrides !== undefined) {
-      sets.push(`subtitle_overrides = $${n++}`);
-      vals.push(body.subtitle_overrides === null
-        ? null : JSON.stringify(body.subtitle_overrides));
-    }
 
     const oldIn = parseFloat(clip.source_in_s);
     const oldOut = parseFloat(clip.source_out_s);
@@ -79,6 +67,7 @@ export async function PATCH(
     if (sets.length) {
       vals.push(id);
       await client.query(`UPDATE clips SET ${sets.join(", ")} WHERE id = $${n}`, vals);
+      await markStaleForClip(id, client);
     }
     await client.query("COMMIT");
     return NextResponse.json({ ok: true });

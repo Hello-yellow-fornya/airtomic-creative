@@ -86,6 +86,17 @@ def render_variant(conn: psycopg.Connection, cfg: Config, s3, variant_id: str,
     clip = conn.execute(
         "SELECT * FROM clips WHERE id = %s", (variant["clip_id"],)
     ).fetchone()
+    # Subtitle settings are variant-level (0015); clips carry the legacy
+    # copy as a fallback for rows that predate the migration.
+    subs = {
+        "subtitle_preset_id": variant["subtitle_preset_id"]
+        or clip["subtitle_preset_id"],
+        "subtitle_overrides": (
+            variant["subtitle_overrides"]
+            if variant["subtitle_overrides"] is not None
+            else clip["subtitle_overrides"]
+        ),
+    }
     video = conn.execute(
         "SELECT * FROM videos WHERE id = %s", (clip["video_id"],)
     ).fetchone()
@@ -127,9 +138,9 @@ def render_variant(conn: psycopg.Connection, cfg: Config, s3, variant_id: str,
         {"word": w["word"], "start": float(w["start_s"]), "end": float(w["end_s"])}
         for w in words
     ]
-    _apply_fixes(word_dicts, clip["subtitle_overrides"] or {})
+    _apply_fixes(word_dicts, subs["subtitle_overrides"] or {})
     out_words = subtitles.output_words(scenes, word_dicts)
-    preset = _load_preset(conn, clip)
+    preset = _load_preset(conn, subs)
 
     # Text overlays: a layer above subtitles, times on the output timeline.
     ovs = conn.execute(
@@ -197,12 +208,12 @@ def _load_assets(conn, s3, scenes, workdir: str) -> dict[str, dict[str, Any]]:
     return assets
 
 
-def _load_preset(conn: psycopg.Connection, clip: dict[str, Any]) -> dict[str, Any]:
+def _load_preset(conn: psycopg.Connection, subs: dict[str, Any]) -> dict[str, Any]:
     row = None
-    if clip["subtitle_preset_id"]:
+    if subs["subtitle_preset_id"]:
         row = conn.execute(
             "SELECT config FROM subtitle_presets WHERE id = %s",
-            (clip["subtitle_preset_id"],),
+            (subs["subtitle_preset_id"],),
         ).fetchone()
     if row is None:
         row = conn.execute(
@@ -210,7 +221,7 @@ def _load_preset(conn: psycopg.Connection, clip: dict[str, Any]) -> dict[str, An
             "ORDER BY created_at LIMIT 1"
         ).fetchone()
     preset = dict(row["config"]) if row else {}
-    overrides = dict(clip["subtitle_overrides"] or {})
+    overrides = dict(subs["subtitle_overrides"] or {})
     overrides.pop("fixes", None)  # word corrections, not style — applied to words
     return {**preset, **overrides}
 

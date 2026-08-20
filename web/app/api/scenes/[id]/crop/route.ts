@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { q } from "@/lib/db";
+import { markStaleForScene } from "@/lib/variants";
 
 export const dynamic = "force-dynamic";
 
@@ -33,5 +34,6 @@ export async function PUT(
      DO UPDATE SET crop_x = $3, crop_y = $4, crop_w = $5, crop_h = $6`,
     [id, ratio, x, y, w, h],
   );
+  await markStaleForScene(id);
   return NextResponse.json({ ok: true });
 }

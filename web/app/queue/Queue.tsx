@@ -7,7 +7,7 @@ type Row = {
   id: string; label: string; name: string; slug: string;
   status: string; rawStatus: string;
   by: string | null; when: string | null;
-  clipName: string | null; videoTitle: string | null;
+  sourceRange: string; videoTitle: string | null;
   nScenes: number; duration: number | null; pushStatus: string | null;
 };
 
@@ -147,7 +147,7 @@ export default function Queue({ rows }: { rows: Row[] }) {
                         {r.label} · {r.name}
                       </a>
                     </div>
-                    <div className="sub">{r.clipName ?? "untitled clip"}{r.when ? ` · ${r.when}` : ""}</div>
+                    <div className="sub">{r.sourceRange}{r.when ? ` · ${r.when}` : ""}</div>
                   </td>
                   <td>{r.videoTitle}</td>
                   <td className="num">{r.duration !== null ? `${r.duration.toFixed(1)}s` : "—"}</td>

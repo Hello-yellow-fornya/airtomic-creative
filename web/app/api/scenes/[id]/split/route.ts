@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
+import { markStaleVariant } from "@/lib/variants";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +57,7 @@ export async function POST(
       [s.variant_id, s.idx + 1, s.layout, at, sOut, s.lifted,
        s.slot_a_asset, s.split_ratio, s.audio],
     );
+    await markStaleVariant(s.variant_id, client);
     await client.query("COMMIT");
     return NextResponse.json({ ok: true, new_scene_id: ins.rows[0].id });
   } catch (e) {

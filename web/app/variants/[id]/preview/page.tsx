@@ -14,13 +14,13 @@ export default async function PreviewPage({
   const { id } = await params;
   const [variant] = await q<{
     id: string; label: string; name: string; status: string; clip_id: string;
-    clip_name: string | null; clip_in: string; clip_out: string;
+    clip_in: string; clip_out: string;
     subtitle_preset_id: string | null; subtitle_overrides: Record<string, unknown> | null;
     video_id: string; video_title: string | null;
     src_w: number | null; src_h: number | null;
   }>(
     `SELECT cv.id::text, cv.label, cv.name, cv.status::text,
-            c.id::text AS clip_id, c.name AS clip_name,
+            c.id::text AS clip_id,
             c.source_in_s::text AS clip_in, c.source_out_s::text AS clip_out,
             c.subtitle_preset_id::text, c.subtitle_overrides,
             v.id::text AS video_id, v.title AS video_title,
@@ -103,7 +103,7 @@ export default async function PreviewPage({
   return (
     <>
       <Topbar
-        title={`Preview · ${variant.clip_name ?? "untitled clip"}`}
+        title={`Preview · ${variant.name}`}
         sub="Watch each variant end to end, then submit for review"
       >
         <Link className="btn ghost sm" href={`/variants/${variant.id}`}>

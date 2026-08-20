@@ -1,22 +1,24 @@
-/** Ad naming per convention: KLR_{SOURCE}_{topic}_c{NN}_{LABEL}_{slug}.
- * Topic and cut number come from the clip name until the recommendation
- * engine supplies them. Shared by the Send screen and export downloads so
- * a downloaded file carries the exact name the ad would. */
+/** Ad naming per convention: KLR_{SOURCE}_{topic}_{LABEL}.
+ * The topic comes from the VARIANT name — since 0015 the variant is the
+ * named unit and the parent clip carries no name. Shared by the Send
+ * screen and export downloads so a downloaded file carries the exact name
+ * the ad would, and stays parse-friendly for the ad_creative name parser
+ * when a variant is pushed to Meta. */
 
 export const slugify = (s: string) =>
   s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 18);
 
 export function adName(v: {
-  videoSource: string; clipName: string | null; label: string; slug: string;
+  videoSource: string; name: string; label: string;
 }): string {
   const src = v.videoSource === "longform" ? "POD" : "AD";
-  const topic = slugify(v.clipName ?? "clip").replace(/-/g, "_") || "clip";
-  return `KLR_${src}_${topic}_${v.label}_${v.slug}`;
+  const topic = slugify(v.name).replace(/-/g, "_") || "clip";
+  return `KLR_${src}_${topic}_${v.label}`;
 }
 
 /** Filename for one export file: ad name + ratio + extension. */
 export function exportFilename(
-  v: { videoSource: string; clipName: string | null; label: string; slug: string },
+  v: { videoSource: string; name: string; label: string },
   ratio: string,
   ext: "mp4" | "srt",
 ): string {

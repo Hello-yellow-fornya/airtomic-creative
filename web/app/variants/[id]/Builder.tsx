@@ -1,9 +1,10 @@
 "use client";
 
-/** Clip builder — the prototype's 04 BUILD screen wired to real data.
- * Direct-manipulation crop over the actual footage, filmstrip trim,
- * transport, live caption preview from real word timings, drag-reorder
- * scene rail, collapsible sidebar, variant rail with naming popover.
+/** Variant editor — the prototype's 04 BUILD screen wired to real data.
+ * Selection-driven: the clips table above chooses which variant this
+ * edits; there is no header block, just a 40px bar (name · label ·
+ * approval · ratio tabs · safe zones · template · links) so the scrubber
+ * and scene strip fit on screen without scrolling at 1080p.
  *
  * Yellow is reserved for machine claims; every control here is a human
  * action, so the only yellow on this screen is the trim handles' hardware
@@ -16,11 +17,14 @@ import { useRouter } from "next/navigation";
 
 type VariantInfo = {
   id: string; label: string; name: string; status: string;
-  clipId: string; clipName: string | null; clipIn: number; clipOut: number;
+  clipId: string; clipIn: number; clipOut: number;
   presetId: string | null; overrides: Record<string, unknown>;
-  videoId: string; videoDuration: number; srcW: number; srcH: number;
+  videoId: string; videoTitle?: string | null;
+  videoDuration: number; srcW: number; srcH: number;
 };
-type Sibling = { id: string; label: string; name: string; status: string; nScenes: number };
+export type ComparePayload = {
+  id: string; label: string; name: string; overlays: Ov[];
+};
 type Scene = {
   id: string; idx: number; layout: string; in: number | null; out: number | null;
   dur: number | null; lifted: boolean; asset: string | null;
@@ -75,7 +79,6 @@ const SAFE: Record<string, { t: number; b: number; r: number }> = {
 const LY_NAME: Record<string, string> = {
   full: "Full", split_product: "Product", split_speakers: "Speakers", card: "End card",
 };
-const NAME_SUGS = ["Emotional hook", "Contrarian open", "Question open", "Product first", "Short cut", "No end card"];
 const MIN_CLIP = 3;
 
 type Style = {
@@ -105,12 +108,18 @@ const clock = (t: number) =>
   `${String(Math.floor(t / 60)).padStart(2, "0")}:${(t % 60).toFixed(1).padStart(4, "0")}`;
 
 export default function Builder({
-  variant, siblings, scenes, crops, assets, presets, words, workerUp,
+  variant, scenes, crops, assets, presets, words, workerUp,
   overlays, overlayStyles, renderStale,
+  compare = null, compareOn = false,
+  onJumpToRename, registerFlush, onDataChanged,
 }: {
-  variant: VariantInfo; siblings: Sibling[]; scenes: Scene[]; crops: Crop[];
+  variant: VariantInfo; scenes: Scene[]; crops: Crop[];
   assets: Asset[]; presets: Preset[]; words: Word[]; workerUp: boolean;
   overlays: Ov[]; overlayStyles: OvStyle[]; renderStale: boolean;
+  compare?: ComparePayload | null; compareOn?: boolean;
+  onJumpToRename?: () => void;
+  registerFlush?: (fn: () => Promise<void>) => void;
+  onDataChanged?: () => void;
 }) {
   const router = useRouter();
   const srcAr = variant.srcW / Math.max(variant.srcH, 1);
@@ -197,8 +206,13 @@ export default function Builder({
     else setNote((await res.json().catch(() => ({}))).error ?? "overlay save failed");
   }
   function patchOverlayDebounced(id: string, patch: Record<string, unknown>) {
+    pendingOvPatches.current[id] = { ...pendingOvPatches.current[id], ...patch };
     clearTimeout(ovSaveTimers.current[id]);
-    ovSaveTimers.current[id] = setTimeout(() => void patchOverlay(id, patch), 500);
+    ovSaveTimers.current[id] = setTimeout(() => {
+      const p = pendingOvPatches.current[id];
+      delete pendingOvPatches.current[id];
+      if (p) void patchOverlay(id, p);
+    }, 500);
   }
   async function delOverlay(id: string) {
     setOvs((o) => o.filter((x) => x.id !== id));
@@ -227,6 +241,16 @@ export default function Builder({
 
   // ----- playback -----
   const videoRef = useRef<HTMLVideoElement>(null);
+  // Compare baseline player: follows the main player's clock so hook
+  // differences are checked at the same playhead. Muted, display-only.
+  const cmpVideoRef = useRef<HTMLVideoElement>(null);
+  const syncCmp = useCallback((srcTime: number, playing: boolean) => {
+    const c = cmpVideoRef.current;
+    if (!c || !Number.isFinite(c.duration)) return;
+    if (Math.abs(c.currentTime - srcTime) > 0.25) c.currentTime = srcTime;
+    if (playing && c.paused) void c.play().catch(() => {});
+    if (!playing && !c.paused) c.pause();
+  }, []);
   const [t, setT] = useState(0); // clip-relative
   const [playing, setPlaying] = useState(false);
   const [rate, setRate] = useState(1);
@@ -248,11 +272,13 @@ export default function Builder({
       setT(OUT - IN);
       setPlaying(false);
       stopRaf();
+      syncCmp(OUT, false);
       return;
     }
     setT(Math.max(0, rel));
+    syncCmp(v.currentTime, true);
     rafRef.current = requestAnimationFrame(tickRaf);
-  }, [IN, OUT]);
+  }, [IN, OUT, syncCmp]);
 
   const play = useCallback(() => {
     const v = videoRef.current;
@@ -269,13 +295,15 @@ export default function Builder({
     videoRef.current?.pause();
     setPlaying(false);
     stopRaf();
-  }, []);
+    syncCmp(videoRef.current?.currentTime ?? IN, false);
+  }, [syncCmp, IN]);
   const seek = useCallback((rel: number) => {
     const v = videoRef.current;
     const clamped = Math.max(0, Math.min(OUT - IN, rel));
     if (v) v.currentTime = IN + clamped;
     setT(clamped);
-  }, [IN, OUT]);
+    syncCmp(IN + clamped, false);
+  }, [IN, OUT, syncCmp]);
   useEffect(() => () => stopRaf(), []);
   useEffect(() => {
     if (videoRef.current) videoRef.current.playbackRate = rate;
@@ -330,6 +358,19 @@ export default function Builder({
   const srcRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
 
+  // "drag to reframe" shows on the first hover only, then stays hidden —
+  // the old duplicate info banner under the transport is gone.
+  const [hintSeen, setHintSeen] = useState(true);
+  useEffect(() => {
+    setHintSeen(localStorage.getItem("reframeHintSeen") === "1");
+  }, []);
+  const onCropLeave = () => {
+    if (localStorage.getItem("reframeHintSeen") !== "1") {
+      localStorage.setItem("reframeHintSeen", "1");
+      setHintSeen(true);
+    }
+  };
+
   async function saveCrop(pos: { x: number; y: number }) {
     if (!scene) return;
     const crop = box.axis === "x"
@@ -340,7 +381,8 @@ export default function Builder({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ratio: bRatio, ...crop }),
     });
-    router.refresh();
+    setStale(true); // reframe is part of the render fingerprint
+    if (onDataChanged) onDataChanged(); else router.refresh();
   }
 
   /** Drag state lives in a ref, not React state, so the pointermove path
@@ -558,7 +600,10 @@ export default function Builder({
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ source_in_s: lastIn, source_out_s: lastOut }),
-        }).then(() => router.refresh());
+        }).then(() => {
+          setStale(true); // shared range change stales every variant
+          if (onDataChanged) onDataChanged(); else router.refresh();
+        });
         if (wasPlaying) setResumeAfterTrim(true);
       };
       window.addEventListener("pointermove", onMove);
@@ -590,24 +635,51 @@ export default function Builder({
       setNote(err.error ?? res.statusText);
       return null;
     }
-    router.refresh();
+    if (onDataChanged) onDataChanged(); else router.refresh();
     return res.json().catch(() => ({}));
-  }, [router]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router, onDataChanged]);
 
-  // ----- subtitle persistence (debounced) -----
+  // ----- subtitle persistence (debounced, flushable) -----
+  // Subtitles are VARIANT-level: restyling B never touches A. The pending
+  // payload lives in a ref so a row switch can flush it before unloading.
+  const pendingStyle = useRef<Record<string, unknown> | null>(null);
+  const sendStyle = useCallback(async () => {
+    const body = pendingStyle.current;
+    if (!body) return;
+    pendingStyle.current = null;
+    await fetch(`/api/variants/${variant.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }, [variant.id]);
   const persistStyle = useCallback((nextOv: Record<string, unknown>, nextFixes: Record<string, string>, nextPreset: string | null) => {
+    pendingStyle.current = {
+      subtitle_preset_id: nextPreset,
+      subtitle_overrides: { ...nextOv, ...(Object.keys(nextFixes).length ? { fixes: nextFixes } : {}) },
+    };
+    setStale(true); // subtitles are part of the render fingerprint
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      void fetch(`/api/clips/${variant.clipId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subtitle_preset_id: nextPreset,
-          subtitle_overrides: { ...nextOv, ...(Object.keys(nextFixes).length ? { fixes: nextFixes } : {}) },
-        }),
-      });
-    }, 500);
-  }, [variant.clipId]);
+    saveTimer.current = setTimeout(() => void sendStyle(), 500);
+  }, [sendStyle]);
+
+  // ----- flush: finish in-flight debounced saves before a row switch -----
+  const pendingOvPatches = useRef<Record<string, Record<string, unknown>>>({});
+  const flush = useCallback(async () => {
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+    const jobs: Promise<unknown>[] = [sendStyle()];
+    for (const [oid, patch] of Object.entries(pendingOvPatches.current)) {
+      clearTimeout(ovSaveTimers.current[oid]);
+      jobs.push(fetch(`/api/overlays/${oid}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      }));
+    }
+    pendingOvPatches.current = {};
+    await Promise.all(jobs);
+  }, [sendStyle]);
+  useEffect(() => { registerFlush?.(flush); }, [registerFlush, flush]);
 
   function setStyle(patch: Partial<Style>) {
     const next = { ...S, ...patch };
@@ -657,44 +729,10 @@ export default function Builder({
     const close = (e: MouseEvent) => {
       const el = e.target as Element;
       if (!el.closest(".addmenu") && !el.closest(".scn-add")) setMenuOpen(false);
-      if (!el.closest(".namer") && !el.closest(".var-add") && !el.closest("[data-var]")) setNamer(null);
     };
     document.addEventListener("click", close);
     return () => document.removeEventListener("click", close);
   }, []);
-
-  // ----- namer popover -----
-  const [namer, setNamer] = useState<{ mode: "add" | "rename"; target?: string; anchor: { left: number; top: number } } | null>(null);
-  const [namerVal, setNamerVal] = useState("");
-  const varRailRef = useRef<HTMLDivElement>(null);
-
-  function openNamer(mode: "add" | "rename", anchorEl: HTMLElement, target?: string) {
-    const w = varRailRef.current!.getBoundingClientRect();
-    const r = anchorEl.getBoundingClientRect();
-    setNamerVal(mode === "rename" ? siblings.find((s) => s.id === target)?.name ?? "" : "");
-    setNamer({
-      mode, target,
-      anchor: {
-        left: Math.max(0, Math.min(r.left - w.left, w.width - 254)),
-        top: r.bottom - w.top + 6,
-      },
-    });
-  }
-  async function commitNamer() {
-    if (!namer) return;
-    if (namer.mode === "add") {
-      const res = await call(`/api/clips/${variant.clipId}/variants`, "POST", {
-        name: namerVal.trim() || undefined,
-        copy_from: variant.id,
-      });
-      setNamer(null);
-      if (res?.variant_id) router.push(`/variants/${res.variant_id}`);
-    } else {
-      if (namerVal.trim())
-        await call(`/api/variants/${namer.target}`, "PATCH", { name: namerVal.trim() });
-      setNamer(null);
-    }
-  }
 
   // ----- derived -----
   const shape = useMemo(() => {
@@ -728,10 +766,19 @@ export default function Builder({
   return (
     <div className="build">
       <div>
-        <div className="prev-tools" style={{ margin: "0 0 10px" }}>
+        {/* one 40px bar replaces the old title block */}
+        <div className="vbar">
+          <button className="vbar-name" title="Click to rename in the table"
+            onClick={() => onJumpToRename?.()}>
+            {variant.name}
+          </button>
+          <span className="tag mk-pill">{variant.label}</span>
+          <span className="tag">{variant.status.replace("_", " ")}</span>
+          <i className="chipsep" />
           <div className="seg">
             {Object.keys(RATIOS).map((r) => (
               <button key={r} data-on={bRatio === r ? "1" : undefined}
+                title={`${RATIOS[r].use} · ${RATIOS[r].px}`}
                 onClick={() => setBRatio(r)}>
                 {RATIOS[r].label}
                 {scene && scene.layout !== "card" && hasCropSet(scene.id, r) ? " ●" : ""}
@@ -742,19 +789,70 @@ export default function Builder({
             <input type="checkbox" checked={zones} onChange={(e) => setZones(e.target.checked)} />
             {" "}Safe zones
           </label>
-          <span className="mono" style={{ fontSize: 10.5, color: "var(--faint)" }}>
-            {RATIOS[bRatio].use} · {RATIOS[bRatio].px}
+          <span className="tag" title="Scene template shape">
+            {shape === "custom" ? "Custom"
+              : { plain: "Plain", product: "Product split", hookfirst: "Hook first + card" }[shape]}
           </span>
+          <span style={{ flex: 1 }} />
+          <a className="vbar-link" href={`/videos/${variant.videoId}`}>Back to transcript</a>
+          <a className="vbar-link" href={`/variants/${variant.id}/preview`}>Preview</a>
         </div>
 
-        <div className="stage">
+        {compareOn && compare && (
+          <div className="cmp-note mono">
+            Comparing against {compare.label} · {compare.name} — same playhead,
+            each side shows its own overlays.
+          </div>
+        )}
+        <div className={`stage${compareOn && compare ? " cmp" : ""}`}>
+          {compareOn && compare && (
+            <div className="src cmp-src" style={{
+              aspectRatio: `${srcAr}`,
+              width: `min(48%, ${Math.round(420 * srcAr)}px)`,
+            }}>
+              {workerUp && (
+                <video ref={cmpVideoRef} src={`/api/media/${variant.videoId}`}
+                  preload="metadata" muted playsInline
+                  onLoadedMetadata={(e) => { e.currentTarget.currentTime = IN + t; }} />
+              )}
+              {compare.overlays.filter((o) => t >= o.start && t < o.end).map((o) => {
+                const cfg = styleCfg(o.style) as {
+                  fs?: number; weight?: number; color?: string; box?: boolean;
+                  box_color?: string; box_alpha?: number; uppercase?: boolean;
+                };
+                return (
+                  <div key={o.id} style={{
+                    position: "absolute", left: "50%",
+                    top: `${ovY(o.position, bRatio) * 100}%`,
+                    transform: "translate(-50%,-50%)", zIndex: 6,
+                    maxWidth: "86%", textAlign: "center",
+                    fontFamily: "'Plus Jakarta Sans','Inter',sans-serif",
+                    fontWeight: cfg.weight ?? 700,
+                    fontSize: (cfg.fs ?? 40) * 0.4,
+                    lineHeight: 1.15, whiteSpace: "pre-wrap",
+                    color: cfg.color ?? "#fff",
+                    ...(cfg.box ? {
+                      background: `${cfg.box_color ?? "#0A0B0D"}${Math.round((cfg.box_alpha ?? 0.75) * 255).toString(16).padStart(2, "0")}`,
+                      padding: "3px 8px", borderRadius: 5,
+                    } : {}),
+                  }}>
+                    {cfg.uppercase ? o.text.toUpperCase() : o.text}
+                  </div>
+                );
+              })}
+              <span className="cmp-tag mono">{compare.label} · baseline</span>
+            </div>
+          )}
           {/* The .src box IS the displayed frame: sized to fit the stage on
               both axes at the source's aspect, so crop percentages measure
-              the displayed frame exactly. 420px height cap keeps the
-              filmstrip and transport on a laptop screen. */}
+              the displayed frame exactly. With the header gone the player
+              scales into the freed height; the cap still keeps the
+              filmstrip + scenes strip on a 1080p screen. */}
           <div className="src" ref={srcRef} style={{
             aspectRatio: `${srcAr}`,
-            width: `min(100%, 520px, ${Math.round(420 * srcAr)}px)`,
+            width: compareOn && compare
+              ? `min(48%, ${Math.round(420 * srcAr)}px)`
+              : `min(100%, 540px, ${Math.round(420 * srcAr)}px)`,
           }}>
             {workerUp && !videoErr ? (
               <video
@@ -865,6 +963,7 @@ export default function Builder({
                   top: `${(box.axis === "y" ? cropPos.y : 0) * 100}%`,
                 }}
                 onPointerDown={onCropDown}
+                onPointerLeave={onCropLeave}
                 onKeyDown={onCropKey}
               >
                 <div className="thirds">
@@ -874,10 +973,12 @@ export default function Builder({
                 <b className="br tl" /><b className="br tr" /><b className="br bl" /><b className="br br2" />
                 <div className="zone t" style={{ height: `${sz.t}%` }}><span>TOP</span></div>
                 <div className="zone b" style={{ height: `${sz.b}%` }}><span>BOTTOM</span></div>
-                <div className="crop-hint">
-                  drag to reframe · {RATIOS[bRatio].label}
-                  {box.axis === "y" ? " · vertical axis" : ""}
-                </div>
+                {!hintSeen && (
+                  <div className="crop-hint">
+                    drag to reframe · {RATIOS[bRatio].label}
+                    {box.axis === "y" ? " · vertical axis" : ""}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -925,75 +1026,6 @@ export default function Builder({
         </div>
         <div className="strip-scale">
           <span>{mmss(a0)}</span><span>{mmss(a1)}</span>
-        </div>
-
-        {/* variants */}
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginTop: 16 }}>
-          <div className="eyebrow">Variants</div>
-          <span className="mono" style={{ fontSize: 10.5, color: "var(--faint)" }}>
-            Same body, different hooks
-          </span>
-        </div>
-        <div className="rail-wrap" ref={varRailRef}>
-          <div className="vars">
-            {siblings.map((v) => (
-              <button key={v.id} className="var" data-var={v.id}
-                data-on={v.id === variant.id ? "1" : undefined}
-                title="Click to open · double-click to rename"
-                onClick={(e) => {
-                  if ((e.target as Element).closest("[data-delvar]")) return;
-                  if (v.id !== variant.id) router.push(`/variants/${v.id}`);
-                }}
-                onDoubleClick={(e) => {
-                  e.preventDefault();
-                  openNamer("rename", e.currentTarget, v.id);
-                }}>
-                <span className="mk">{v.label}</span>
-                <span className="nm">{v.name}</span>
-                <span className="ct">{v.nScenes}</span>
-                {siblings.length > 1 && v.status !== "sent" && (
-                  <span className="x" data-delvar
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      const res = await call(`/api/variants/${v.id}`, "DELETE");
-                      if (res && v.id === variant.id) {
-                        const next = siblings.find((s) => s.id !== v.id);
-                        if (next) router.push(`/variants/${next.id}`);
-                      }
-                    }}>×</span>
-                )}
-              </button>
-            ))}
-            <button className="var-add"
-              onClick={(e) => { e.stopPropagation(); openNamer("add", e.currentTarget); }}>
-              + Add variant
-            </button>
-          </div>
-          {namer && (
-            <div className="namer on" style={{ left: namer.anchor.left, top: namer.anchor.top }}>
-              <div className="lb">{namer.mode === "add" ? "Name this variant" : "Rename variant"}</div>
-              <input type="text" autoFocus value={namerVal}
-                placeholder={namer.mode === "add"
-                  ? `Variant ${String.fromCharCode(65 + siblings.length)}` : "Variant name"}
-                onChange={(e) => setNamerVal(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") { e.preventDefault(); void commitNamer(); }
-                  if (e.key === "Escape") setNamer(null);
-                }}
-              />
-              <div className="sugs">
-                {NAME_SUGS.filter((s) => !siblings.some((v) => v.name === s)).slice(0, 4).map((s) => (
-                  <button key={s} className="sug" onClick={() => setNamerVal(s)}>{s}</button>
-                ))}
-              </div>
-              <div className="acts">
-                <button className="btn ghost sm" onClick={() => setNamer(null)}>Cancel</button>
-                <button className="btn sm" onClick={() => void commitNamer()}>
-                  {namer.mode === "add" ? "Add" : "Save"}
-                </button>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* scenes */}
@@ -1181,21 +1213,12 @@ export default function Builder({
               : `Window at ${Math.round(cropPos.x * 100)}%`}
           </div>
         </div>
-        <div className="note" style={{ marginTop: 10 }}>
-          {srcAr > 1
-            ? "Landscape source, vertical output — narrower ratios crop width. "
-            : srcAr < 0.99
-              ? "Vertical source — wider ratios crop height and reframe vertically; 9:16 uses the whole frame. "
-              : "Square source — vertical ratios crop width, wide ratios crop height. "}
-          Drag the frame to reframe and the yellow handles to trim — both save
-          with the clip, so re-exports keep them.
-        </div>
         {note && <p className="hint">{note}</p>}
       </div>
 
       {/* ---------- sidebar ---------- */}
       <div className="card pad">
-        <Acc title="Template" sum={shape === "custom" ? "Custom" : { plain: "Plain", product: "Product split", hookfirst: "Hook first + card" }[shape]} defaultOpen>
+        <Acc title="Template" sum={shape === "custom" ? "Custom" : { plain: "Plain", product: "Product split", hookfirst: "Hook first + card" }[shape]}>
           <div className="presets" style={{ marginBottom: 2 }}>
             {([["plain", "Plain"], ["product", "Product split"], ["hookfirst", "Hook first + card"]] as const).map(([k, lbl]) => (
               <button key={k} className="chip" data-on={shape === k ? "1" : undefined}
@@ -1208,7 +1231,7 @@ export default function Builder({
           </div>
         </Acc>
 
-        <Acc title="Assets" sum={`${assets.length} in library`} defaultOpen>
+        <Acc title="Assets" sum={`${assets.length} in library`}>
           {assets.length ? (
             <div className="imp">
               {assets.map((a) => (
@@ -1326,7 +1349,7 @@ export default function Builder({
           )}
         </Acc>
 
-        <Acc title="Overlays" sum={ovs.length ? `${ovs.length} on clip` : "none"} defaultOpen={ovs.length > 0}>
+        <Acc title="Overlays" sum={ovs.length ? `${ovs.length} on variant` : "none"} defaultOpen>
           {stale && (
             <div className="ov-stale">
               Overlays changed since the last render — the export is stale.
@@ -1405,7 +1428,7 @@ export default function Builder({
           </p>
         </Acc>
 
-        <Acc title="Subtitles" sum={`${activePresetName} · ${S.fs}px`}>
+        <Acc title="Subtitles" sum={`${activePresetName} · ${S.fs}px`} defaultOpen>
           <div className="presets">
             {presets.map((p) => (
               <button key={p.id} className="chip"
@@ -1479,10 +1502,6 @@ export default function Builder({
           </p>
         </Acc>
 
-        <button className="btn" style={{ width: "100%", marginTop: 14 }}
-          onClick={() => router.push(`/variants/${variant.id}/preview`)}>
-          Preview {siblings.length > 1 ? "all variants" : "this variant"}
-        </button>
         {!draft && (
           <p style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 8 }}>
             This variant is {variant.status.replace("_", " ")} — edits here

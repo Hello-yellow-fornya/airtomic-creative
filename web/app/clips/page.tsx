@@ -1,13 +1,12 @@
 import { q } from "@/lib/db";
 import { Topbar } from "../ui";
-import ClipsTable from "./ClipsTable";
+import Workbench from "./Workbench";
 
 export const dynamic = "force-dynamic";
 
 export default async function ClipsPage() {
   const rows = await q<{
     clip_id: string;
-    clip_name: string | null;
     video_id: string;
     video_title: string | null;
     video_source: string;
@@ -25,7 +24,7 @@ export default async function ClipsPage() {
     kf_scene: string | null;
     n_overlays: string;
   }>(`
-    SELECT c.id::text AS clip_id, c.name AS clip_name,
+    SELECT c.id::text AS clip_id,
            v.id::text AS video_id, v.title AS video_title,
            v.source::text AS video_source,
            c.source_in_s::text, c.source_out_s::text,
@@ -61,18 +60,18 @@ export default async function ClipsPage() {
     ) kf ON true
     ORDER BY c.created_at DESC, cv.label`);
 
+  const workerUp = !!(process.env.WORKER_URL && process.env.INGEST_TOKEN);
+
   return (
     <>
       <Topbar
         title="Clip builder"
-        sub="Each variant is one ad. Click a row to open it; finished renders play and download under their ad name."
+        sub="Every row is one ad. Click a row to load it in the editor below; ↑↓ move, Enter renames, Space plays."
       />
       <section className="screen">
-        <h2 className="sec">Clips</h2>
-        <ClipsTable
+        <Workbench
           rows={rows.map((r) => ({
             clipId: r.clip_id,
-            clipName: r.clip_name,
             videoId: r.video_id,
             videoTitle: r.video_title,
             videoSource: r.video_source,
@@ -80,7 +79,7 @@ export default async function ClipsPage() {
             outS: parseFloat(r.source_out_s),
             variantId: r.variant_id,
             label: r.label,
-            variantName: r.variant_name,
+            name: r.variant_name,
             slug: r.slug,
             status: r.status,
             renderStale: r.render_stale,
@@ -90,6 +89,7 @@ export default async function ClipsPage() {
             kfScene: r.kf_scene,
             nOverlays: parseInt(r.n_overlays, 10),
           }))}
+          workerUp={workerUp}
         />
       </section>
     </>

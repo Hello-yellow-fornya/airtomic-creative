@@ -19,12 +19,12 @@ export default async function SendPage({
 
   const variants = await q<{
     id: string; label: string; name: string; slug: string; status: string;
-    clip_name: string | null; video_title: string | null; video_source: string;
+    video_title: string | null; video_source: string;
     n_scenes: string; duration: string | null; has_card: boolean; has_split: boolean;
     push_status: string | null; push_error: string | null;
   }>(`
     SELECT cv.id::text, cv.label, cv.name, cv.slug, cv.status::text,
-           c.name AS clip_name, v.title AS video_title, v.source::text AS video_source,
+           v.title AS video_title, v.source::text AS video_source,
            (SELECT count(*) FROM variant_scenes vs WHERE vs.variant_id = cv.id)::text AS n_scenes,
            (SELECT sum(COALESCE(vs.source_out_s - vs.source_in_s, vs.duration_s))::text
             FROM variant_scenes vs WHERE vs.variant_id = cv.id) AS duration,
@@ -57,7 +57,7 @@ export default async function SendPage({
           variants={variants.map((v) => ({
             id: v.id, label: v.label, name: v.name, slug: v.slug,
             status: v.status,
-            clipName: v.clip_name, videoTitle: v.video_title,
+            videoTitle: v.video_title,
             videoSource: v.video_source,
             nScenes: parseInt(v.n_scenes, 10),
             duration: v.duration ? parseFloat(v.duration) : null,

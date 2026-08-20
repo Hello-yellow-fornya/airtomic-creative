@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
+import { markStaleVariant } from "@/lib/variants";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +58,7 @@ export async function POST(
       await client.query("ROLLBACK");
       return NextResponse.json({ error: "bad layout" }, { status: 400 });
     }
+    await markStaleVariant(id, client);
     await client.query("COMMIT");
     return NextResponse.json({ ok: true });
   } catch (e) {

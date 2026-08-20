@@ -5,7 +5,7 @@ import { adName as sharedAdName, slugify } from "@/lib/adname";
 
 type V = {
   id: string; label: string; name: string; slug: string; status: string;
-  clipName: string | null; videoTitle: string | null; videoSource: string;
+  videoTitle: string | null; videoSource: string;
   nScenes: number; duration: number | null; hasCard: boolean; hasSplit: boolean;
   pushStatus: string | null; pushError: string | null;
 };

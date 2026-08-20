@@ -12,12 +12,13 @@ export default async function QueuePage() {
   const rows = await q<{
     id: string; label: string; name: string; slug: string; status: string;
     submitted_by: string | null; submitted_at: string | null;
-    clip_name: string | null; video_title: string | null;
+    source_range: string; video_title: string | null;
     n_scenes: string; duration: string | null; push_status: string | null;
   }>(`
     SELECT cv.id::text, cv.label, cv.name, cv.slug, cv.status::text,
            cv.submitted_by, cv.submitted_at::text,
-           c.name AS clip_name, v.title AS video_title,
+           round(c.source_in_s) || 's–' || round(c.source_out_s) || 's' AS source_range,
+           v.title AS video_title,
            (SELECT count(*) FROM variant_scenes vs WHERE vs.variant_id = cv.id)::text AS n_scenes,
            (SELECT sum(COALESCE(vs.source_out_s - vs.source_in_s, vs.duration_s))::text
             FROM variant_scenes vs WHERE vs.variant_id = cv.id) AS duration,
@@ -49,7 +50,7 @@ export default async function QueuePage() {
             rawStatus: r.status,
             by: r.submitted_by,
             when: r.submitted_at ? r.submitted_at.slice(0, 10) : null,
-            clipName: r.clip_name,
+            sourceRange: r.source_range,
             videoTitle: r.video_title,
             nScenes: parseInt(r.n_scenes, 10),
             duration: r.duration ? parseFloat(r.duration) : null,

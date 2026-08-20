@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
+import { markStaleVariant } from "@/lib/variants";
 
 export const dynamic = "force-dynamic";
 
@@ -65,6 +66,7 @@ export async function POST(
         ]);
       }
     }
+    await markStaleVariant(variant_id, client);
     await client.query("COMMIT");
     return NextResponse.json({ ok: true });
   } catch (e) {

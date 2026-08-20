@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { pool, q } from "@/lib/db";
+import { markStaleForScene, markStaleVariant } from "@/lib/variants";
 
 export const dynamic = "force-dynamic";
 
@@ -71,6 +72,7 @@ export async function PATCH(
 
   vals.push(id);
   await q(`UPDATE variant_scenes SET ${sets.join(", ")} WHERE id = $${n}`, vals);
+  await markStaleForScene(id);
   return NextResponse.json({ ok: true });
 }
 
@@ -96,6 +98,7 @@ export async function DELETE(
          WHERE vs.id = ranked.id`,
         [res.rows[0].variant_id],
       );
+      await markStaleVariant(res.rows[0].variant_id, client);
     }
     await client.query("COMMIT");
   } catch (e) {
