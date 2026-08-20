@@ -244,6 +244,7 @@ def transcribe(
     min_speakers: int | None = None,
     max_speakers: int | None = None,
     diarise: bool = True,
+    language: str | None = "en",
 ) -> dict:
     import gc
     import tempfile
@@ -269,7 +270,10 @@ def transcribe(
 
     model = whisperx.load_model(WHISPER_MODEL, device, compute_type="float16")
     audio = whisperx.load_audio(audio_path)
-    result = model.transcribe(audio, batch_size=16)
+    # Klira content is English; short/quiet ads misdetect (observed: 'cy',
+    # 'nn') and the aligner has no model for those. Force the language
+    # unless the caller explicitly passes language=None for autodetect.
+    result = model.transcribe(audio, batch_size=16, language=language)
     language = result["language"]
     _release(model)
 
@@ -421,6 +425,7 @@ def api():
             min_speakers=body.get("min_speakers"),
             max_speakers=body.get("max_speakers"),
             diarise=body.get("diarise", True),
+            language=body.get("language", "en"),
         )
         return {"call_id": call.object_id}
 

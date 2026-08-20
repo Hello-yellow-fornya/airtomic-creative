@@ -56,6 +56,7 @@ def transcribe(
     min_speakers: int | None = None,
     max_speakers: int | None = None,
     diarise: bool = True,
+    language: str | None = "en",
 ) -> dict[str, Any]:
     headers = {"Authorization": f"Bearer {token}"}
 
@@ -66,6 +67,7 @@ def transcribe(
             "min_speakers": min_speakers,
             "max_speakers": max_speakers,
             "diarise": diarise,
+            "language": language,
         },
         headers=headers,
         timeout=60,
