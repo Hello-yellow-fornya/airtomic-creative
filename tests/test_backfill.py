@@ -1,7 +1,7 @@
 """Backfill mapping logic: video-id resolution (asset_feed_spec handled
 explicitly), raw-count extraction, purchase key priority."""
 
-from worker.backfill import _purchases, perf_row
+from worker.backfill import _purchases, breakdown_row, perf_row
 from worker.meta import video_ids_of_ad
 
 
@@ -89,3 +89,45 @@ def test_missing_metrics_are_null_not_zero():
     assert row["video_3s_views"] is None    # absent ≠ zero
     assert row["purchases"] is None
     assert row["spend"] is None
+
+
+BREAKDOWN_INSIGHT = {
+    "ad_id": "a9",
+    "ad_name": "UF_Andy Ad2_H1: What if less skincare did more?_Video_19/08/2026",
+    "impressions": "1850", "spend": "32.7555", "account_currency": "GBP",
+    "actions": [
+        {"action_type": "video_view", "value": "568"},
+        {"action_type": "link_click", "value": "24"},
+        {"action_type": "omni_purchase", "value": "2"},
+    ],
+    "action_values": [{"action_type": "omni_purchase", "value": "80.0"}],
+    "video_asset": {"video_id": "3569047136587530",
+                    "video_name": "ANDY_AD2_1-1_H1.mp4"},
+}
+
+
+def test_breakdown_row_per_video_raw_counts():
+    row = breakdown_row(BREAKDOWN_INSIGHT)
+    assert row["meta_video_id"] == "3569047136587530"
+    assert row["impressions"] == 1850
+    assert row["spend"] == 32.7555
+    assert row["video_3s_views"] == 568
+    assert row["purchases"] == 2 and row["purchase_value"] == 80.0
+    assert "video_asset" in row["attribution_window"]
+
+
+def test_breakdown_unavailable_metrics_stay_null():
+    row = breakdown_row(BREAKDOWN_INSIGHT)
+    # the breakdown does not expose these — never prorated from ad totals
+    for k in ("video_15s_views", "thruplays", "video_p25", "video_p50",
+              "video_p75", "video_p100"):
+        assert row[k] is None
+
+
+def test_breakdown_row_parses_both_names():
+    parts = breakdown_row(BREAKDOWN_INSIGHT)["name_parts"]
+    assert parts["ad"]["funnel_stage"] == "UF"
+    assert parts["ad"]["hook"] == "H1"
+    assert parts["video_name"] == "ANDY_AD2_1-1_H1.mp4"
+    assert parts["video"]["rendition"] == "1x1"
+    assert parts["video"]["concept_stem"] == "andy ad2 h1"

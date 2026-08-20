@@ -242,6 +242,35 @@ class MetaClient:
             params["date_preset"] = "maximum"
         return self.get_all(f"{self.account}/insights", params, cap=limit_total)
 
+    def insights_video_asset(
+        self,
+        since: str | None = None,
+        until: str | None = None,
+        limit_total: int = 5000,
+    ) -> list[dict]:
+        """Ad-level insights broken down by video asset — per-(ad, video)
+        raw counts for placement-customised asset_feed ads, where the
+        creative object alone can't attribute spend per video. The
+        breakdown exposes impressions/spend/actions but NOT the
+        video_*_watched fields; callers must leave those NULL."""
+        params: dict = {
+            "level": "ad",
+            "breakdowns": "video_asset",
+            "fields": "ad_id,ad_name,adset_id,campaign_id,objective,"
+                      "impressions,reach,spend,account_currency,"
+                      "actions,action_values,date_start,date_stop",
+            "use_unified_attribution_setting": "true",
+            "limit": 200,
+        }
+        if since or until:
+            import json as _json
+            params["time_range"] = _json.dumps(
+                {"since": since or "2000-01-01",
+                 "until": until or "2100-01-01"})
+        else:
+            params["date_preset"] = "maximum"
+        return self.get_all(f"{self.account}/insights", params, cap=limit_total)
+
     def video_node(self, meta_video_id: str) -> dict:
         """The ad video's metadata including its (short-lived) source URL —
         callers must copy the file to R2 immediately, never store the URL."""

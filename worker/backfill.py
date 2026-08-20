@@ -5,29 +5,38 @@
     python -m worker.backfill --apply         # write ad_performance, copy
                                               # videos to R2, queue ingest
     python -m worker.backfill --apply --skip-media   # perf rows only
-    python -m worker.backfill --since 2024-01-01 --until 2025-08-19 --apply
+    python -m worker.backfill --apply --min-spend 500  # only fetch videos
+                                              # with >= £500 attributed spend
     python -m worker.backfill --limit 10 --apply     # first careful batch
 
-What it does, in order:
- 1. Lists every ad on the account with its creative's video reference(s).
- 2. Pulls ad-level insights — RAW COUNTS ONLY (impressions, 3s/15s views,
-    thruplays, quartiles, link clicks, spend, purchases, purchase value).
-    Rates are never imported; video_performance computes them (CLAUDE.md §2).
- 3. Joins ads to videos. An ad whose creative carries MULTIPLE videos
-    (asset_feed_spec dynamic creative) is REPORTED AND SKIPPED — writing one
-    spend row per video would double-count the ad's spend in the rollup.
-    The summary lists every such ad so the de-duplication question
-    (CLAUDE.md open question 1) gets answered with data.
- 4. Upserts ad_performance keyed (ad_id, meta_video_id).
- 5. For each distinct video not yet ingested: fetches the video node, copies
-    the file to R2 IMMEDIATELY (Meta source URLs are short-lived — never
-    stored or resolved on demand), and queues the normal ingest →
-    scene detect → tag → recommend chain so the back catalogue gets the same
-    treatment as long-form.
+How the video→ad join works (validated against the live account):
 
-Needs META_APP_ID / META_APP_SECRET / META_SYSTEM_USER_TOKEN /
-META_AD_ACCOUNT_ID plus the worker's DATABASE_URL and R2 env. ads_read is
-sufficient — nothing here writes to Meta.
+ PRIMARY — insights with breakdowns=video_asset. Klira runs placement-
+ customised asset_feed_spec ads (two renditions of one creative per ad),
+ so the creative object alone can't attribute spend per video. The
+ video_asset breakdown returns per-(ad, video) delivery straight from
+ Meta: impressions, spend, 3-second views, clicks, purchases — RAW COUNTS
+ ONLY, no double-counting, covering every asset-feed ad that delivered.
+ LIMITATION: 15s views, thruplays and quartiles are NOT available under
+ this breakdown; those columns stay NULL on breakdown rows (null, never
+ zero, never prorated from ad totals).
+
+ LEGACY — pre-asset-feed ads (single video on the creative) don't appear
+ in the breakdown. They join directly on the creative's video id via
+ plain ad-level insights, which DO carry the full video metric set.
+
+ Anything else with video plays but no attribution path is REPORTED, not
+ guessed. Statics and catalogue/DPA ads are out of scope by nature.
+
+Names are parsed at import (worker/adnames.py): funnel stage, theme, hook,
+format and date from the ad name; rendition ratio and concept stem from the
+video filename ("ANDY_AD2_1-1_H1.mp4" / "ANDY_AD2_9-16_H1.mp4" are one
+creative). Stored in ad_performance.name_parts; the raw names stay in
+ad_name / name_parts.video_name.
+
+Video files are copied to R2 at fetch time (Meta source URLs are
+short-lived) and queued through the normal ingest → scene detect → tag →
+recommend chain. Partial failure isolates. Dry run is the default.
 """
 
 import argparse
@@ -40,13 +49,11 @@ from typing import Any
 
 import requests
 
-from . import config, db, r2
+from . import adnames, config, db, r2
 from .meta import MetaClient, MetaError, video_ids_of_ad
 
 log = logging.getLogger("worker.backfill")
 
-# purchases can be reported under several action_types; take the first
-# present, in this order, and record which was used.
 PURCHASE_KEYS = ("omni_purchase", "purchase", "offsite_conversion.fb_pixel_purchase")
 
 
@@ -71,8 +78,6 @@ def _action_value(row: dict, key: str) -> float | None:
 
 
 def _video_metric(row: dict, field: str) -> int | None:
-    """Fields like video_thruplay_watched_actions come back as an actions
-    list with a single 'video_view' entry."""
     return _action(row, "video_view", field)
 
 
@@ -98,7 +103,7 @@ def _float(v) -> float | None:
         return None
 
 
-def perf_row(insight: dict, meta_video_id: str) -> dict[str, Any]:
+def _base_row(insight: dict, meta_video_id: str) -> dict[str, Any]:
     purchases, purchase_value, purchase_key = _purchases(insight)
     return {
         "meta_video_id": meta_video_id,
@@ -112,22 +117,64 @@ def perf_row(insight: dict, meta_video_id: str) -> dict[str, Any]:
         "impressions": _int(insight.get("impressions")),
         "reach": _int(insight.get("reach")),
         "video_3s_views": _action(insight, "video_view"),
+        "link_clicks": _action(insight, "link_click"),
+        "spend": _float(insight.get("spend")),
+        "purchases": purchases,
+        "purchase_value": purchase_value,
+        "currency": insight.get("account_currency"),
+        "_purchase_key": purchase_key,
+    }
+
+
+def perf_row(insight: dict, meta_video_id: str) -> dict[str, Any]:
+    """Full-metric row from PLAIN ad-level insights (legacy single-video
+    ads): 15s/thruplay/quartiles are available here."""
+    row = _base_row(insight, meta_video_id)
+    row.update({
         "video_15s_views": _video_metric(insight, "video_15_sec_watched_actions"),
         "thruplays": _video_metric(insight, "video_thruplay_watched_actions"),
         "video_p25": _video_metric(insight, "video_p25_watched_actions"),
         "video_p50": _video_metric(insight, "video_p50_watched_actions"),
         "video_p75": _video_metric(insight, "video_p75_watched_actions"),
         "video_p100": _video_metric(insight, "video_p100_watched_actions"),
-        "link_clicks": _action(insight, "link_click"),
-        "spend": _float(insight.get("spend")),
-        "purchases": purchases,
-        "purchase_value": purchase_value,
-        "currency": insight.get("account_currency"),
-        # unified attribution was requested; record which purchase
-        # action_type supplied the conversion counts
         "attribution_window": "unified"
-                              + (f"/{purchase_key}" if purchase_key else ""),
-    }
+                              + (f"/{row['_purchase_key']}" if row["_purchase_key"] else ""),
+        "name_parts": _name_parts(insight.get("ad_name"), None),
+    })
+    row.pop("_purchase_key")
+    return row
+
+
+def breakdown_row(insight: dict) -> dict[str, Any]:
+    """Per-(ad, video) row from the video_asset breakdown. The breakdown
+    does not expose 15s/thruplay/quartiles — those stay NULL, never
+    prorated from the ad's totals."""
+    va = insight.get("video_asset") or {}
+    row = _base_row(insight, str(va.get("video_id")))
+    row.update({
+        "video_15s_views": None,
+        "thruplays": None,
+        "video_p25": None, "video_p50": None,
+        "video_p75": None, "video_p100": None,
+        "attribution_window": "unified/video_asset"
+                              + (f"/{row['_purchase_key']}" if row["_purchase_key"] else ""),
+        "name_parts": _name_parts(insight.get("ad_name"), va.get("video_name")),
+    })
+    row.pop("_purchase_key")
+    return row
+
+
+def _name_parts(ad_name: str | None, video_name: str | None) -> dict:
+    parts: dict[str, Any] = {}
+    ad = adnames.parse_ad_name(ad_name)
+    if ad:
+        parts["ad"] = ad
+    if video_name:
+        parts["video_name"] = video_name
+        vid = adnames.parse_video_name(video_name)
+        if vid:
+            parts["video"] = vid
+    return parts
 
 
 UPSERT_SQL = """
@@ -136,13 +183,14 @@ INSERT INTO ad_performance
      date_start, date_stop, impressions, reach, video_3s_views,
      video_15s_views, thruplays, video_p25, video_p50, video_p75,
      video_p100, link_clicks, spend, purchases, purchase_value,
-     currency, attribution_window, synced_at)
+     currency, attribution_window, name_parts, synced_at)
 VALUES (%(meta_video_id)s, %(ad_id)s, %(adset_id)s, %(campaign_id)s,
         %(ad_name)s, %(objective)s, %(date_start)s, %(date_stop)s,
         %(impressions)s, %(reach)s, %(video_3s_views)s, %(video_15s_views)s,
         %(thruplays)s, %(video_p25)s, %(video_p50)s, %(video_p75)s,
         %(video_p100)s, %(link_clicks)s, %(spend)s, %(purchases)s,
-        %(purchase_value)s, %(currency)s, %(attribution_window)s, now())
+        %(purchase_value)s, %(currency)s, %(attribution_window)s,
+        %(name_parts)s, now())
 ON CONFLICT (ad_id, meta_video_id) DO UPDATE SET
     adset_id = EXCLUDED.adset_id, campaign_id = EXCLUDED.campaign_id,
     ad_name = EXCLUDED.ad_name, objective = EXCLUDED.objective,
@@ -158,6 +206,7 @@ ON CONFLICT (ad_id, meta_video_id) DO UPDATE SET
     purchase_value = EXCLUDED.purchase_value,
     currency = EXCLUDED.currency,
     attribution_window = EXCLUDED.attribution_window,
+    name_parts = EXCLUDED.name_parts,
     synced_at = now()
 """
 
@@ -182,8 +231,72 @@ def fetch_video_to_r2(client: MetaClient, s3, bucket: str,
     return r2.make_uri(bucket, key), node.get("title"), _float(node.get("length"))
 
 
+def build_plan(client: MetaClient, since: str | None, until: str | None,
+               limit: int | None) -> dict[str, Any]:
+    """All the Meta reads: returns rows to write, videos to fetch, and the
+    coverage report. Pure reads, no DB, no writes anywhere."""
+    log.info("listing ads with creatives…")
+    ads = client.ads_with_creatives()
+    if limit:
+        ads = ads[:limit]
+    ad_ids = {ad["id"] for ad in ads}
+    ad_videos = {ad["id"]: video_ids_of_ad(ad) for ad in ads}
+    single = {aid: vids[0] for aid, vids in ad_videos.items() if len(vids) == 1}
+
+    log.info("pulling insights with breakdowns=video_asset (per-video raw counts)…")
+    bd = client.insights_video_asset(since=since, until=until)
+    bd = [r for r in bd if (r.get("video_asset") or {}).get("video_id")
+          and (not limit or r.get("ad_id") in ad_ids)]
+    bd_ads = {r["ad_id"] for r in bd}
+    rows = [breakdown_row(r) for r in bd]
+
+    log.info("pulling plain ad-level insights (legacy single-video ads)…")
+    plain = client.insights_ad_level(since=since, until=until)
+    if limit:
+        plain = [r for r in plain if r.get("ad_id") in ad_ids]
+    legacy = [perf_row(r, single[r["ad_id"]]) for r in plain
+              if r.get("ad_id") in single and r.get("ad_id") not in bd_ads]
+    rows += legacy
+
+    # honesty sweep: ads with video plays that neither path attributes
+    unattributed = [
+        {"ad_id": r["ad_id"], "ad_name": r.get("ad_name"),
+         "spend": _float(r.get("spend")),
+         "video_3s_views": _action(r, "video_view")}
+        for r in plain
+        if (_action(r, "video_view") or 0) > 0
+        and r.get("ad_id") not in bd_ads
+        and r.get("ad_id") not in single
+    ]
+
+    spend_by_video: dict[str, float] = {}
+    for r_ in rows:
+        spend_by_video[r_["meta_video_id"]] = (
+            spend_by_video.get(r_["meta_video_id"], 0.0) + (r_["spend"] or 0.0))
+
+    concepts: dict[str, list[str]] = {}
+    for r_ in rows:
+        stem = ((r_["name_parts"].get("video") or {}).get("concept_stem")
+                if r_["name_parts"] else None)
+        if stem:
+            concepts.setdefault(stem, [])
+            if r_["meta_video_id"] not in concepts[stem]:
+                concepts[stem].append(r_["meta_video_id"])
+
+    return {
+        "ads_total": len(ads),
+        "breakdown_rows": len(bd),
+        "breakdown_ads": len(bd_ads),
+        "legacy_rows": len(legacy),
+        "rows": rows,
+        "unattributed": unattributed,
+        "spend_by_video": spend_by_video,
+        "concepts": concepts,
+    }
+
+
 def run(apply: bool, since: str | None, until: str | None,
-        limit: int | None, skip_media: bool) -> int:
+        limit: int | None, skip_media: bool, min_spend: float) -> int:
     cfg = config.load()
     missing = [n for n, v in (
         ("META_APP_ID", cfg.meta_app_id),
@@ -202,43 +315,35 @@ def run(apply: bool, since: str | None, until: str | None,
         api_version=cfg.meta_api_version,
     )
 
-    log.info("listing ads with creatives…")
-    ads = client.ads_with_creatives()
-    if limit:
-        ads = ads[:limit]
-    ad_videos = {ad["id"]: video_ids_of_ad(ad) for ad in ads}
-    single = {aid: vids[0] for aid, vids in ad_videos.items() if len(vids) == 1}
-    multi = {aid: vids for aid, vids in ad_videos.items() if len(vids) > 1}
-    no_video = [aid for aid, vids in ad_videos.items() if not vids]
-    log.info("%s ads: %s single-video, %s multi-video (asset_feed_spec), "
-             "%s without video", len(ads), len(single), len(multi), len(no_video))
+    plan = build_plan(client, since, until, limit)
+    rows = plan["rows"]
+    spend_by_video = plan["spend_by_video"]
+    wanted = sorted(v for v, s in spend_by_video.items() if s >= min_spend)
+    total_spend = sum(r_["spend"] or 0 for r_ in rows)
+    multi_rendition = sum(1 for vids in plan["concepts"].values() if len(vids) > 1)
 
-    if multi:
-        log.warning("MULTI-VIDEO ADS — skipped to avoid double-counting spend "
-                    "in the video→ad join. These need a de-duplication "
-                    "decision before their spend can be attributed:")
-        for aid, vids in multi.items():
-            name = next((a.get("name") for a in ads if a["id"] == aid), "?")
-            log.warning("  ad %s (%s): videos %s", aid, name, ", ".join(vids))
-
-    log.info("pulling ad-level insights (raw counts only)…")
-    insights = client.insights_ad_level(since=since, until=until)
-    rows = [perf_row(i, single[i["ad_id"]])
-            for i in insights if i.get("ad_id") in single]
-    skipped_perf = [i["ad_id"] for i in insights
-                    if i.get("ad_id") in multi]
-    log.info("%s insight rows total; %s joinable to a single video; "
-             "%s belong to multi-video ads (skipped)",
-             len(insights), len(rows), len(skipped_perf))
-
-    wanted_videos = sorted({r["meta_video_id"] for r in rows})
-    log.info("%s distinct videos referenced", len(wanted_videos))
+    log.info(
+        "coverage: %s ads scanned · %s per-video rows from the video_asset "
+        "breakdown (%s ads) · %s legacy single-video rows · £%.0f attributed "
+        "video spend · %s distinct videos (%s over the £%.0f media floor) · "
+        "%s concept stems (%s spanning multiple renditions)",
+        plan["ads_total"], plan["breakdown_rows"], plan["breakdown_ads"],
+        plan["legacy_rows"], total_spend, len(spend_by_video), len(wanted),
+        min_spend, len(plan["concepts"]), multi_rendition,
+    )
+    if plan["unattributed"]:
+        log.warning("%s ad(s) show video plays but no attribution path — "
+                    "reported, not guessed:", len(plan["unattributed"]))
+        for u in plan["unattributed"]:
+            log.warning("  ad %s (%s): £%.2f spend, %s 3s views",
+                        u["ad_id"], u["ad_name"], u["spend"] or 0,
+                        u["video_3s_views"])
 
     if not apply:
-        log.info("DRY RUN — nothing written. Sample row:\n%s",
+        log.info("DRY RUN — nothing written. Sample breakdown row:\n%s",
                  json.dumps(rows[0], indent=1, default=str) if rows else "(none)")
         log.info("re-run with --apply to write %s ad_performance rows and "
-                 "%s videos%s", len(rows), len(wanted_videos),
+                 "fetch %s videos%s", len(rows), len(wanted),
                  " (media skipped)" if skip_media else "")
         return 0
 
@@ -248,7 +353,8 @@ def run(apply: bool, since: str | None, until: str | None,
 
     with conn.transaction():
         for r_ in rows:
-            conn.execute(UPSERT_SQL, r_)
+            conn.execute(UPSERT_SQL, {**r_, "name_parts":
+                         json.dumps(r_["name_parts"]) if r_["name_parts"] else None})
     log.info("wrote %s ad_performance rows", len(rows))
 
     if skip_media:
@@ -262,7 +368,7 @@ def run(apply: bool, since: str | None, until: str | None,
         ).fetchall()
     }
     queued, failed = 0, []
-    for mvid in wanted_videos:
+    for mvid in wanted:
         if mvid in existing:
             continue
         try:
@@ -276,12 +382,11 @@ def run(apply: bool, since: str | None, until: str | None,
             queued += 1
             log.info("queued %s as video %s (job %s)", mvid, vid, job_id)
         except (MetaError, requests.RequestException, OSError) as exc:
-            # partial failure isolates: everything already queued stays
             failed.append((mvid, str(exc)))
             log.error("video %s failed: %s", mvid, exc)
 
     log.info("done: %s videos queued for ingest, %s already present, "
-             "%s failed", queued, len(existing & set(wanted_videos)), len(failed))
+             "%s failed", queued, len(existing & set(wanted)), len(failed))
     for mvid, err in failed:
         log.error("  failed %s: %s", mvid, err)
     return 1 if failed else 0
@@ -300,10 +405,12 @@ def main() -> None:
     p.add_argument("--limit", type=int, help="cap the number of ads (first careful run)")
     p.add_argument("--skip-media", action="store_true",
                    help="write ad_performance only; don't fetch video files")
+    p.add_argument("--min-spend", type=float, default=0.0,
+                   help="only fetch video files with at least this much attributed spend")
     args = p.parse_args()
     try:
         sys.exit(run(args.apply, args.since, args.until, args.limit,
-                     args.skip_media))
+                     args.skip_media, args.min_spend))
     except MetaError as exc:
         log.error("meta api error: %s %s", exc, json.dumps(exc.detail))
         sys.exit(2)
