@@ -435,6 +435,12 @@ def run(apply: bool, since: str | None, until: str | None,
         log.info("media skipped (--skip-media) — done")
         return 0
 
+    # Pre-flight the transcribe endpoint before queueing the batch — a
+    # disabled Modal workspace otherwise surfaces as one bare 404 per
+    # video after the files are already fetched.
+    from . import modal_client
+    modal_client.preflight(cfg.modal_transcribe_url)
+
     existing = {
         row["meta_video_id"]
         for row in conn.execute(

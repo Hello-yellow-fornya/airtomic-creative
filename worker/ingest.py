@@ -79,7 +79,18 @@ def handle(conn: psycopg.Connection, cfg: Config, s3, job: dict[str, Any]) -> No
              meta["has_audio"], video_id),
         )
         if not meta["has_audio"]:
-            raise IngestError("source has no audio stream — nothing to transcribe")
+            # Silent sources (static-style ad videos) still carry visual
+            # signal: skip transcription and continue to scene detection and
+            # tagging, so their visual tags count in the corpus. No
+            # transcript rows are written — downstream already treats a
+            # missing transcript honestly (tag sends "(no transcript)",
+            # recommend has nothing to score, subtitle burns are empty).
+            log.info("video %s has no audio stream — skipping transcription, "
+                     "continuing to scene detection", video_id)
+            db.set_video_status(conn, video_id, "transcribing",
+                                "no audio — visual-only pipeline")
+            pipeline.advance(conn, video_id, "ingest")
+            return
 
         db.set_video_status(conn, video_id, "transcribing", "extracting audio")
         media.extract_wav(src_path, wav_path)
