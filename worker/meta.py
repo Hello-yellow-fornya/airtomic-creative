@@ -279,27 +279,6 @@ class MetaClient:
             {"fields": "id,title,source,length,created_time"},
         )
 
-
-def video_ids_of_ad(ad: dict) -> list[str]:
-    """Every distinct video id an ad's creative references. One id is the
-    normal case; several means asset_feed_spec dynamic creative — the exact
-    case where a video→ad spend join double-counts, so callers must handle
-    len > 1 explicitly, never average over it."""
-    creative = ad.get("creative") or {}
-    ids: list[str] = []
-
-    def add(v):
-        if v and str(v) not in ids:
-            ids.append(str(v))
-
-    add(creative.get("video_id"))
-    oss = creative.get("object_story_spec") or {}
-    add((oss.get("video_data") or {}).get("video_id"))
-    afs = creative.get("asset_feed_spec") or {}
-    for vid in afs.get("videos") or []:
-        add((vid or {}).get("video_id"))
-    return ids
-
     def diag(self) -> dict:
         """The full read-only proof: token scopes, version, account,
         campaigns and ad sets. Never writes anything."""
@@ -324,3 +303,24 @@ def video_ids_of_ad(ad: dict) -> list[str]:
             except requests.RequestException as exc:
                 out[key] = {"error": f"network: {exc}"}
         return out
+
+
+def video_ids_of_ad(ad: dict) -> list[str]:
+    """Every distinct video id an ad's creative references. One id is the
+    normal case; several means asset_feed_spec dynamic creative — the exact
+    case where a video→ad spend join double-counts, so callers must handle
+    len > 1 explicitly, never average over it."""
+    creative = ad.get("creative") or {}
+    ids: list[str] = []
+
+    def add(v):
+        if v and str(v) not in ids:
+            ids.append(str(v))
+
+    add(creative.get("video_id"))
+    oss = creative.get("object_story_spec") or {}
+    add((oss.get("video_data") or {}).get("video_id"))
+    afs = creative.get("asset_feed_spec") or {}
+    for vid in afs.get("videos") or []:
+        add((vid or {}).get("video_id"))
+    return ids
