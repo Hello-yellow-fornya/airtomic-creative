@@ -92,6 +92,9 @@ def build_ass(
     preset's vertical position PER EVENT — how overlays push overlapping
     subtitle lines out of their way (worker/overlays.subtitle_shift_for)."""
     cfg = {**DEFAULT_PRESET, **(preset or {})}
+    from .overlays import FONTS as _FONTS
+    if cfg.get("font") not in _FONTS and cfg.get("font") != "Inter":
+        cfg["font"] = DEFAULT_PRESET["font"]
     wpl = max(1, int(cfg["wpl"]))
     # Prototype fs values are calibrated to a ~540px-wide preview at fs*0.5;
     # scale by output width so lines fill comparably at every ratio.

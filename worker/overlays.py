@@ -20,6 +20,17 @@ design choice, not a collision. Computed here so preview and burn agree.
 
 from typing import Any
 
+# Curated OFL set vendored into the image (worker/fonts). Only these
+# family names may reach an ASS Fontname — anything else falls back.
+FONTS = [
+    "Plus Jakarta Sans", "Inter", "Montserrat", "Poppins",
+    "Bebas Neue", "Playfair Display", "Space Grotesk",
+]
+
+
+def safe_font(name: object, default: str = "Plus Jakarta Sans") -> str:
+    return name if isinstance(name, str) and name in FONTS else default
+
 # Safe-zone percentages per ratio (mirrors the web SAFE map): UI chrome at
 # the top, captions/CTA chrome at the bottom.
 SAFE = {
@@ -58,7 +69,7 @@ def resolve_cfg(ov: dict[str, Any],
     sv = ov.get("sv")
     if sv:
         return {
-            "font": "Plus Jakarta Sans",
+            "font": safe_font(sv.get("font")),
             "fs": float(sv.get("fs", 40)),
             "ol": float(sv.get("ol") or 0),
             "vp": float(sv["vp"]) if sv.get("vp") is not None else None,

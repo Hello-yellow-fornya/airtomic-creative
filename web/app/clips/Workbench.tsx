@@ -14,7 +14,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { exportFilename } from "@/lib/adname";
 import Builder, { type ComparePayload, type OvSv } from "../variants/[id]/Builder";
 
 type GroupScene = {
@@ -24,7 +23,8 @@ type GroupScene = {
 };
 type GroupVariant = {
   id: string; label: string; name: string; status: string;
-  renderStale: boolean; ratios: string[]; scenes: GroupScene[];
+  renderStale: boolean; ratios: string[]; exportRatios: string[];
+  ratioStatus: { ratio: string; status: string }[]; scenes: GroupScene[];
   presetId: string | null; overrides: Record<string, unknown>;
   renderStatus: string | null; renderError: string | null;
   overlays: { id: string; text: string; start: number; end: number; position: string; style: string; sv: OvSv | null }[];
@@ -40,6 +40,7 @@ type EditorPayload = {
     videoDuration: number; srcW: number; srcH: number;
     orphan: boolean;
     renderStatus: string | null; renderError: string | null; ratios: string[];
+    exportRatios: string[];
   };
   scenes: {
     id: string; idx: number; layout: string; in: number | null;
@@ -63,21 +64,6 @@ const LY_NAME: Record<string, string> = {
 };
 const sceneDur = (s: GroupScene) =>
   s.layout === "card" ? (s.dur ?? 2.5) : (s.out ?? 0) - (s.in ?? 0);
-
-const exportUrl = (variantId: string, ratio: string, ext: "mp4" | "srt", dl?: string) =>
-  `/api/exports/${variantId}/${ratio}.${ext}${dl ? `?dl=${encodeURIComponent(dl)}` : ""}`;
-
-function downloadAll(files: { url: string }[]) {
-  files.forEach((f, i) => {
-    setTimeout(() => {
-      const a = document.createElement("a");
-      a.href = f.url;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    }, i * 500);
-  });
-}
 
 export default function Workbench({ initialVariantId, workerUp }: {
   initialVariantId: string | null; workerUp: boolean;
@@ -164,7 +150,7 @@ export default function Workbench({ initialVariantId, workerUp }: {
         id: g.id, label: g.label, name: g.name, status: g.status,
         presetId: g.presetId, overrides: g.overrides,
         renderStatus: g.renderStatus, renderError: g.renderError,
-        ratios: g.ratios,
+        ratios: g.ratios, exportRatios: g.exportRatios,
       },
       scenes: g.scenes.map((s) => ({ ...s })),
       crops: g.crops,
@@ -336,10 +322,16 @@ export default function Workbench({ initialVariantId, workerUp }: {
   // fixed-position so the menu escapes the strip's scroll clipping
   const [menuFor, setMenuFor] = useState<{ id: string; left: number; top: number; up: boolean } | null>(null);
 
+  // per-card layout popover (glyph in the caption)
+  const [layFor, setLayFor] = useState<{
+    sceneId: string; rowId: string; left: number; top: number; up: boolean;
+    layout: string; srcless: boolean; hasDur: boolean;
+  } | null>(null);
   useEffect(() => {
     const close = (e: MouseEvent) => {
       const el = e.target as Element;
       if (!el.closest(".addmenu") && !el.closest(".scn-add")) setMenuFor(null);
+      if (!el.closest(".laymenu") && !el.closest(".lyglyph")) setLayFor(null);
     };
     document.addEventListener("click", close);
     return () => document.removeEventListener("click", close);
@@ -397,37 +389,56 @@ export default function Workbench({ initialVariantId, workerUp }: {
     setChecked(new Set());
     refreshPayload();
   }
-  async function bulkRender() {
+  /** Export = render every ratio in each target's export set. Targets are
+   * the checked variants, or every variant when none are checked. Stale
+   * variants queue first. Progress reads the group's per-ratio job status
+   * on a poll; finished files land on the Preview screen as before. */
+  const [exportRun, setExportRun] = useState<{
+    jobs: { variantId: string; ratio: string }[];
+  } | null>(null);
+  async function exportAll() {
+    if (!payload || busy) return;
+    const targets = checked.size
+      ? orderedRows.filter((r) => checked.has(r.id))
+      : orderedRows;
+    if (!targets.length) return;
+    // stale variants re-render first
+    const ordered = [...targets].sort(
+      (a, b) => Number(b.renderStale) - Number(a.renderStale));
     setBusy(true);
-    let n = 0;
-    for (const id of checked) {
-      const res = await fetch(`/api/variants/${id}/render`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ratio: "9x16" }),
-      });
-      if (res.ok) n++;
+    const jobs: { variantId: string; ratio: string }[] = [];
+    const errs: string[] = [];
+    for (const g of ordered) {
+      const set = g.exportRatios?.length ? g.exportRatios : ["9x16"];
+      for (const ratio of set) {
+        const res = await fetch(`/api/variants/${g.id}/render`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ratio }),
+        });
+        if (res.ok) jobs.push({ variantId: g.id, ratio });
+        else errs.push(`${g.label} ${ratio}`);
+      }
     }
     setBusy(false);
-    setNote(`${n} render${n === 1 ? "" : "s"} queued (9:16)`);
     setChecked(new Set());
+    setExportRun({ jobs });
+    setNote(errs.length ? `some renders were refused: ${errs.join(", ")}` : null);
     refreshPayload();
   }
-  function bulkExport() {
-    if (!payload) return;
-    const files: { url: string }[] = [];
-    for (const id of checked) {
-      const g = byId.get(id);
-      if (!g) continue;
-      const v = { videoSource: payload.variant.videoSource, name: g.name, label: g.label };
-      for (const ratio of g.ratios)
-        for (const ext of ["mp4", "srt"] as const)
-          files.push({ url: exportUrl(id, ratio, ext, exportFilename(v, ratio, ext)) });
-    }
-    if (!files.length) { setNote("nothing rendered among the checked variants"); return; }
-    downloadAll(files);
-    setNote(`${files.length} file${files.length === 1 ? "" : "s"} downloading`);
-    setChecked(new Set());
-  }
+  // poll while an export run has unfinished jobs
+  useEffect(() => {
+    if (!exportRun) return;
+    const unfinished = exportRun.jobs.some(({ variantId, ratio }) => {
+      const st = byId.get(variantId)?.ratioStatus.find((x) => x.ratio === ratio)?.status;
+      return st !== "done" && st !== "failed";
+    });
+    if (!unfinished) return;
+    const t = setInterval(() => {
+      const cur = selRef.current;
+      if (cur) void loadPayload(cur, true);
+    }, 3000);
+    return () => clearInterval(t);
+  }, [exportRun, byId, loadPayload]);
   async function bulkDelete() {
     if (!payload) return;
     const ids = [...checked];
@@ -481,15 +492,10 @@ export default function Workbench({ initialVariantId, workerUp }: {
         <input type="checkbox" className="lib-check" checked={allChecked}
           aria-label="Select all variants"
           onChange={() => setChecked(allChecked ? new Set() : new Set(orderedRows.map((r) => r.id)))} />
-        <span className="eyebrow">Variants — click a row to load it · drag cards to reorder</span>
         {nChecked > 0 && (
           <span className="vbulk">
             <button className="btn ghost sm" disabled={busy || orphan}
               onClick={() => void bulkApprove()}>Approve ({nChecked})</button>
-            <button className="btn ghost sm" disabled={busy || orphan}
-              onClick={() => void bulkRender()}>Render ({nChecked})</button>
-            <button className="btn ghost sm" disabled={busy}
-              onClick={() => bulkExport()}>Export ({nChecked})</button>
             <button className="btn ghost sm vdel" disabled={busy}
               onClick={() => void bulkDelete()}>Delete ({nChecked})</button>
           </span>
@@ -616,7 +622,30 @@ export default function Workbench({ initialVariantId, workerUp }: {
                       </span>
                     )}
                     <span className="lb">
-                      {LY_NAME[s.layout]}<b>{sceneDur(s).toFixed(1)}s</b>
+                      {orphan ? LY_NAME[s.layout] : (
+                        <button className="lyglyph" title="Change this scene's layout"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const up = rect.bottom > window.innerHeight - 220;
+                            setLayFor((m) => m?.sceneId === s.id ? null : {
+                              sceneId: s.id, rowId: r.id,
+                              left: Math.min(rect.left, window.innerWidth - 190),
+                              top: up ? rect.top - 6 : rect.bottom + 6, up,
+                              layout: s.layout, srcless: s.in === null,
+                              hasDur: s.dur !== null,
+                            });
+                          }}>
+                          <span className="mi">
+                            {s.layout === "full" && <i />}
+                            {s.layout === "split_product" && <><i /><i className="ast" /></>}
+                            {s.layout === "split_speakers" && <><i /><i /></>}
+                            {s.layout === "card" && <i className="crd" />}
+                          </span>
+                          {LY_NAME[s.layout]}
+                        </button>
+                      )}
+                      <b>{sceneDur(s).toFixed(1)}s</b>
                     </span>
                   </div>
                 ))}
@@ -648,7 +677,9 @@ export default function Workbench({ initialVariantId, workerUp }: {
                     <button onClick={() => { setMenuFor(null); void call(`/api/variants/${r.id}/scenes`, "POST", { layout: "full" }); }}>
                       <span className="mi"><i /></span>Full frame
                     </button>
-                    <button onClick={() => {
+                    <button disabled={!payload?.assets.length}
+                      title={!payload?.assets.length ? "needs a brand asset — the assets library is empty" : undefined}
+                      onClick={() => {
                       setMenuFor(null);
                       void call(`/api/variants/${r.id}/scenes`, "POST", {
                         layout: "split_product",
@@ -656,11 +687,17 @@ export default function Workbench({ initialVariantId, workerUp }: {
                       });
                     }}>
                       <span className="mi"><i /><i className="ast" /></span>Product split
+                      {!payload?.assets.length && <span className="sub">needs a brand asset</span>}
                     </button>
-                    <button onClick={() => { setMenuFor(null); void call(`/api/variants/${r.id}/scenes`, "POST", { layout: "split_speakers" }); }}>
+                    <button disabled={!payload?.assets.length}
+                      title={!payload?.assets.length ? "needs a brand asset — the assets library is empty" : undefined}
+                      onClick={() => { setMenuFor(null); void call(`/api/variants/${r.id}/scenes`, "POST", { layout: "split_speakers" }); }}>
                       <span className="mi"><i /><i /></span>Speakers split
+                      {!payload?.assets.length && <span className="sub">needs a brand asset</span>}
                     </button>
-                    <button onClick={() => {
+                    <button disabled={!payload?.assets.length}
+                      title={!payload?.assets.length ? "needs a brand asset — the assets library is empty" : undefined}
+                      onClick={() => {
                       setMenuFor(null);
                       void call(`/api/variants/${r.id}/scenes`, "POST", {
                         layout: "card",
@@ -668,6 +705,7 @@ export default function Workbench({ initialVariantId, workerUp }: {
                       });
                     }}>
                       <span className="mi"><i className="crd" /></span>End card
+                      {!payload?.assets.length && <span className="sub">needs a brand asset</span>}
                     </button>
                     <div className="sep" />
                     <div className="grp">Apply template</div>
@@ -695,6 +733,79 @@ export default function Workbench({ initialVariantId, workerUp }: {
           );
         })}
       </div>
+
+      {layFor && (() => {
+        const hasAssets = (payload?.assets.length ?? 0) > 0;
+        const pick = (l: string) => {
+          const patch: Record<string, unknown> = { layout: l };
+          if (l === "card" && !layFor.hasDur) patch.duration_s = 2.5;
+          if (l === "split_product") {
+            patch.split_ratio = 0.6;
+            patch.slot_a_asset = payload?.assets.find((a) => a.kind !== "end_card")?.id ?? null;
+          }
+          if (l === "card")
+            patch.slot_a_asset = payload?.assets.find((a) => a.kind === "end_card")?.id ?? null;
+          setLayFor(null);
+          void call(`/api/scenes/${layFor.sceneId}`, "PATCH", patch);
+        };
+        const cardToSource = (l: string) =>
+          layFor.layout === "card" && l !== "card" && layFor.srcless;
+        const opt = (l: string, label: string, glyph: React.ReactNode, needsAsset: boolean) => {
+          const dis = (needsAsset && !hasAssets) || cardToSource(l);
+          return (
+            <button key={l} disabled={dis} data-on={layFor.layout === l ? "1" : undefined}
+              title={cardToSource(l) ? "This card has no source footage"
+                : needsAsset && !hasAssets ? "needs a brand asset — the assets library is empty" : undefined}
+              onClick={() => pick(l)}>
+              <span className="mi">{glyph}</span>{label}
+              {needsAsset && !hasAssets && <span className="sub">needs a brand asset</span>}
+            </button>
+          );
+        };
+        return (
+          <div className="addmenu on laymenu" style={{
+            position: "fixed", left: layFor.left, zIndex: 90,
+            ...(layFor.up
+              ? { bottom: window.innerHeight - layFor.top, top: "auto" }
+              : { top: layFor.top }),
+          }}>
+            <div className="grp">Scene layout</div>
+            {opt("full", "Full frame", <i />, false)}
+            {opt("split_product", "Product split", <><i /><i className="ast" /></>, true)}
+            {opt("split_speakers", "Speakers split", <><i /><i /></>, true)}
+            {opt("card", "End card", <i className="crd" />, true)}
+          </div>
+        );
+      })()}
+
+      <button className="btn vexport" disabled={busy || orphan || !orderedRows.length}
+        title="Renders every ratio in each variant's export set — stale variants first. Finished files appear on the Preview screen."
+        onClick={() => void exportAll()}>
+        {busy && exportRun === null ? "Queuing…"
+          : `Export ${nChecked ? `${nChecked} checked` : "all variants"} — every ratio in the export set`}
+      </button>
+      {exportRun && (
+        <div className="vexp-prog">
+          {[...new Set(exportRun.jobs.map((j) => j.variantId))].map((vid) => {
+            const g = byId.get(vid);
+            if (!g) return null;
+            return (
+              <div key={vid} className="vexp-row">
+                <span className="vexp-nm" title={g.name}>{g.label} · {g.name}</span>
+                {exportRun.jobs.filter((j) => j.variantId === vid).map(({ ratio }) => {
+                  const st = g.ratioStatus.find((x) => x.ratio === ratio)?.status ?? "queued";
+                  return (
+                    <span key={ratio}
+                      className={`tag${st === "done" ? " ok" : st === "failed" ? " flag" : ""}`}>
+                      {ratio.replace("x", ":")} {st}
+                    </span>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      )}
       {note && <p className="hint">{note}</p>}
       {flushFail && (
         <p className="hint" style={{ color: "#9A2F53" }}>

@@ -18,6 +18,11 @@ export const POSITION_VP: Record<string, number> = {
   top: 20, center: 50, lower_third: 76,
 };
 
+export const FONTS = [
+  "Plus Jakarta Sans", "Inter", "Montserrat", "Poppins",
+  "Bebas Neue", "Playfair Display", "Space Grotesk",
+] as const;
+
 export type Placement = { xp: number; vp: number; w: number };
 export type Sv = {
   fs: number; ol: number; vp: number; wpl: number | null;
@@ -28,6 +33,7 @@ export type Sv = {
   color: string; bg: "none" | "pill" | "box"; bg_color: string;
   bg_alpha: number; caps: boolean; weight: number;
   ol_color?: string;
+  font?: string;
 };
 
 const RATIO_KEYS = ["9x16", "4x5", "1x1", "1.91x1"];
@@ -69,6 +75,8 @@ export function sanitizeSv(raw: unknown): Sv | null {
     bg,
     bg_color: HEX.test(String(r.bg_color)) ? String(r.bg_color).toUpperCase() : "#0A0B0D",
     ol_color: HEX.test(String(r.ol_color)) ? String(r.ol_color).toUpperCase() : "#000000",
+    font: (FONTS as readonly string[]).includes(String(r.font))
+      ? String(r.font) : "Plus Jakarta Sans",
     bg_alpha: clamp(Number(r.bg_alpha ?? 0.75), 0, 1),
     caps: !!r.caps,
     weight: clamp(Math.round(Number(r.weight) || 800), 400, 900),

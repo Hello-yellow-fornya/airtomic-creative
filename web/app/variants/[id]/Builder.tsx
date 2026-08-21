@@ -24,6 +24,7 @@ type VariantInfo = {
   videoDuration: number; srcW: number; srcH: number;
   renderStatus?: string | null; renderError?: string | null;
   ratios?: string[];
+  exportRatios?: string[];
 };
 export type ComparePayload = {
   id: string; label: string; name: string; overlays: Ov[];
@@ -45,7 +46,12 @@ export type OvSv = {
   color: string; bg: "none" | "pill" | "box"; bg_color: string;
   bg_alpha: number; caps: boolean; weight: number;
   ol_color?: string;
+  font?: string;
 };
+const FONTS = [
+  "Plus Jakarta Sans", "Inter", "Montserrat", "Poppins",
+  "Bebas Neue", "Playfair Display", "Space Grotesk",
+];
 type Ov = {
   id: string; text: string; start: number; end: number;
   position: string; style: string; sv: OvSv | null;
@@ -130,7 +136,7 @@ type Style = {
   fs: number; ol: number; vp: number; wpl: number; hl: string;
   caps: boolean; box: boolean;
   color: string; bg: "none" | "pill" | "box"; bgColor: string;
-  bgAlpha: number; olColor: string;
+  bgAlpha: number; olColor: string; font: string;
 };
 
 // Brand palette for the Text style panel swatches.
@@ -196,6 +202,22 @@ export default function Builder({
   const scene = scenes[Math.min(sel, Math.max(scenes.length - 1, 0))] as Scene | undefined;
 
   const [bRatio, setBRatio] = useState("9x16");
+  // the ratio tabs ARE the variant's export set (0019): removable to a
+  // minimum of one, re-addable, stored per variant
+  const [exRatios, setExRatios] = useState<string[]>(
+    () => variant.exportRatios?.length ? variant.exportRatios : Object.keys(RATIOS));
+  const [addRatioOpen, setAddRatioOpen] = useState(false);
+  async function saveExportRatios(next: string[]) {
+    const ordered = Object.keys(RATIOS).filter((r) => next.includes(r));
+    if (!ordered.length) return;
+    setExRatios(ordered);
+    setAddRatioOpen(false);
+    if (!ordered.includes(bRatio)) setBRatio(ordered[0]);
+    await fetch(`/api/variants/${variant.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ export_ratios: ordered }),
+    });
+  }
   const [zones, setZones] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -226,6 +248,7 @@ export default function Builder({
       bgColor: String(c.bg_color ?? "#000000"),
       bgAlpha: Number(c.bg_alpha ?? 0.62),
       olColor: String(c.ol_color ?? "#000000"),
+      font: FONTS.includes(String(c.font)) ? String(c.font) : "Plus Jakarta Sans",
     };
   };
   const [S, setS] = useState<Style>(seedStyle);
@@ -259,6 +282,8 @@ export default function Builder({
     seededFor.current = tag;
     setOvs(overlays);
     setStale(renderStale);
+    setExRatios(variant.exportRatios?.length ? variant.exportRatios : Object.keys(RATIOS));
+    setAddRatioOpen(false);
     setPresetId(activePreset?.id ?? null);
     const o = { ...variant.overrides };
     delete o.fixes;
@@ -1086,6 +1111,7 @@ export default function Builder({
       bgColor: String(c.bg_color ?? "#000000"),
       bgAlpha: Number(c.bg_alpha ?? 0.62),
       olColor: String(c.ol_color ?? "#000000"),
+      font: FONTS.includes(String(c.font)) ? String(c.font) : "Plus Jakarta Sans",
     });
     persistStyle({}, fixes, p.id);
   }
@@ -1172,15 +1198,41 @@ export default function Builder({
             </button>
           )}
           <i className="chipsep" />
-          <div className="seg">
-            {Object.keys(RATIOS).map((r) => (
-              <button key={r} data-on={bRatio === r ? "1" : undefined}
-                title={`${RATIOS[r].use} · ${RATIOS[r].px}`}
-                onClick={() => setBRatio(r)}>
-                {RATIOS[r].label}
-                {scene && scene.layout !== "card" && hasCropSet(scene.id, r) ? " ●" : ""}
-              </button>
+          <div className="seg rset">
+            {exRatios.map((r) => (
+              <span key={r} className="rtab">
+                <button data-on={bRatio === r ? "1" : undefined}
+                  title={`${RATIOS[r].use} · ${RATIOS[r].px}`}
+                  onClick={() => setBRatio(r)}>
+                  {RATIOS[r].label}
+                  {scene && scene.layout !== "card" && hasCropSet(scene.id, r) ? " ●" : ""}
+                </button>
+                {exRatios.length > 1 && !readOnly && (
+                  <button className="rx" aria-label={`Remove ${RATIOS[r].label} from the export set`}
+                    title="Remove from this variant's export set — it won't render or export"
+                    onClick={() => void saveExportRatios(exRatios.filter((x) => x !== r))}>
+                    ×
+                  </button>
+                )}
+              </span>
             ))}
+            {exRatios.length < Object.keys(RATIOS).length && !readOnly && (
+              <span className="rtab radd">
+                <button aria-label="Add a ratio to the export set"
+                  data-on={addRatioOpen ? "1" : undefined}
+                  onClick={() => setAddRatioOpen((o) => !o)}>+</button>
+                {addRatioOpen && (
+                  <div className="addmenu on" style={{ minWidth: 130 }}>
+                    {Object.keys(RATIOS).filter((r) => !exRatios.includes(r)).map((r) => (
+                      <button key={r}
+                        onClick={() => void saveExportRatios([...exRatios, r])}>
+                        {RATIOS[r].label} <span style={{ color: "var(--faint)" }}>{RATIOS[r].use}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </span>
+            )}
           </div>
           <label className="zone-tog">
             <input type="checkbox" checked={zones} onChange={(e) => setZones(e.target.checked)} />
@@ -1221,7 +1273,7 @@ export default function Builder({
                     top: `${cpl.vp * 100}%`,
                     transform: "translate(-50%,-50%)", zIndex: 6,
                     width: `${cpl.w * 100}%`, textAlign: "center",
-                    fontFamily: "'Plus Jakarta Sans','Inter',sans-serif",
+                    fontFamily: `'${cfg.font ?? "Plus Jakarta Sans"}',sans-serif`,
                     fontWeight: cfg.weight,
                     fontSize: cfg.fs * 0.4,
                     lineHeight: 1.15, whiteSpace: "pre-wrap",
@@ -1277,7 +1329,7 @@ export default function Builder({
               <div className="cap" role="button" tabIndex={0}
                 onClick={() => setTextTarget("subs")}
                 style={{
-                fontFamily: "var(--font-inter),sans-serif", fontWeight: 700,
+                fontFamily: `'${S.font}',sans-serif`, fontWeight: 700,
                 lineHeight: 1.22, fontSize: capFont, color: S.color,
                 letterSpacing: "-.01em", cursor: "pointer",
                 outline: textTarget === "subs" ? "1px dashed rgba(255,255,255,.45)" : "none",
@@ -1332,7 +1384,7 @@ export default function Builder({
                   }}>
                   <span style={{
                     display: "inline-block", maxWidth: "100%",
-                    fontFamily: "'Plus Jakarta Sans','Inter',sans-serif",
+                    fontFamily: `'${cfg.font ?? "Plus Jakarta Sans"}',sans-serif`,
                     fontWeight: cfg.weight,
                     fontSize: cfg.fs * 0.48,
                     lineHeight: 1.15, whiteSpace: "pre-wrap",
@@ -1476,6 +1528,11 @@ export default function Builder({
 
         {/* transport */}
         <div className="transport">
+          <span className="trim-blk mono">
+            <span className="fld">In <input type="text" className="mono" readOnly value={fmt(IN)} /></span>
+            <span className="fld">Out <input type="text" className="mono" readOnly value={fmt(OUT)} /></span>
+            <b>{clipDur.toFixed(1)}s</b>
+          </span>
           <button className="tbtn pri" aria-label={playing ? "Pause" : "Play"} title="Play (space)"
             onClick={() => (playing ? pause() : play())}>
             <svg viewBox="0 0 12 12">
@@ -1505,16 +1562,6 @@ export default function Builder({
           </div>
         </div>
 
-        <div className="trim">
-          <div className="fld">In <input type="text" className="mono" readOnly value={fmt(IN)} /></div>
-          <div className="fld">Out <input type="text" className="mono" readOnly value={fmt(OUT)} /></div>
-          <div className="fld mono" style={{ color: "var(--ink)" }}>{clipDur.toFixed(1)}s</div>
-          <div className="fld" style={{ marginLeft: "auto" }}>
-            {box.axis === "y"
-              ? cropPos.y < 0.04 ? "Framed high" : cropPos.y > 0.12 ? "Framed low" : "Centred"
-              : `Window at ${Math.round(cropPos.x * 100)}%`}
-          </div>
-        </div>
         {scenesSlot}
         {note && <p className="hint">{note}</p>}
       </div>
@@ -1568,38 +1615,14 @@ export default function Builder({
           )}
         </Acc>
 
-        <Acc title="Scene layout"
+        {/* Layout itself moved onto the scene card (glyph popover); this
+            section keeps the per-scene extras: asset slot, split ratio,
+            lift, audio. */}
+        <Acc title="Scene"
           sum={scene ? [LY_NAME[scene.layout],
             scene.layout.startsWith("split")
               ? `${Math.round(scene.splitRatio * 100)}/${Math.round((1 - scene.splitRatio) * 100)}`
-              : null].filter(Boolean).join(" · ") : ""}
-          defaultOpen>
-          <div className="layouts">
-            {(["full", "split_product", "split_speakers", "card"] as const).map((l) => {
-              const cardToSource = scene?.layout === "card" && l !== "card" && scene?.in === null;
-              return (
-                <button key={l} className="ly" data-on={scene?.layout === l ? "1" : undefined}
-                  disabled={busy || !scene || cardToSource}
-                  title={cardToSource ? "This card has no source footage" : undefined}
-                  onClick={() => {
-                    if (!scene) return;
-                    const patch: Record<string, unknown> = { layout: l };
-                    if (l === "card" && !scene.dur) patch.duration_s = 2.5;
-                    void call(`/api/scenes/${scene.id}`, "PATCH", patch);
-                  }}>
-                  <span className="gl">
-                    {l === "full" && <i />}
-                    {l === "split_product" && <><i /><i className="ast" /></>}
-                    {l === "split_speakers" && <><i /><i /></>}
-                    {l === "card" && <i className="crd" />}
-                  </span>
-                  {l === "full" ? "full" : l === "split_product" ? "product"
-                    : l === "split_speakers" ? "speakers" : "card"}
-                </button>
-              );
-            })}
-          </div>
-
+              : null].filter(Boolean).join(" · ") : ""}>
           {scene && (scene.layout === "split_product" || scene.layout === "card") && (
             <div className="ctrl">
               <label htmlFor="slot">{scene.layout === "card" ? "Card asset" : "Lower slot"}</label>
@@ -1714,14 +1737,10 @@ export default function Builder({
               )}
             </div>
           ))}
-          <button className="btn sm" onClick={() => void addOverlay()}>
+          <button className="btn sm" style={{ width: "100%" }}
+            onClick={() => void addOverlay()}>
             + Overlay
           </button>
-          <p style={{ fontSize: 10.5, color: "var(--muted)", margin: "6px 0 0" }}>
-            New overlays start on the first 3s. Drag the bar on the filmstrip
-            or edit Start/End — edges snap to scene boundaries within 0.2s
-            (hold Alt to disable). Style lives in the Text style panel below.
-          </p>
         </Acc>
 
         <Acc title={`Text style — ${targetOv ? `Overlay ${ovs.findIndex((o) => o.id === targetOv.id) + 1}` : "Subtitles"}`}
@@ -1866,6 +1885,13 @@ export default function Builder({
                 )}
               </div>
               <div className="ctrl">
+                <label htmlFor="subfont">Font</label>
+                <select id="subfont" value={S.font}
+                  onChange={(e) => setStyle({ font: e.target.value })}>
+                  {FONTS.map((f) => <option key={f} value={f}>{f}</option>)}
+                </select>
+              </div>
+              <div className="ctrl">
                 <label htmlFor="fs">Size <b>{S.fs}px</b></label>
                 <input id="fs" type="range" min={16} max={46} value={S.fs}
                   onChange={(e) => setStyle({ fs: +e.target.value })} />
@@ -1950,22 +1976,6 @@ export default function Builder({
           </p>
         </Acc>
 
-        <Acc title="Export">
-          <div className="presets" style={{ margin: 0 }}>
-            {Object.keys(RATIOS).map((r) => (
-              <button key={r} className="chip" disabled={busy}
-                onClick={() => void call(`/api/variants/${variant.id}/render`, "POST", { ratio: r })
-                  .then((res) => res && setNote(`render queued: ${RATIOS[r].label}`))}>
-                Render {RATIOS[r].label}
-              </button>
-            ))}
-          </div>
-          <p style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 6 }}>
-            Renders run on the worker and land in R2. The Preview screen plays
-            the finished export.
-          </p>
-        </Acc>
-
         {!draft && (
           <p style={{ fontSize: 10.5, color: "var(--muted)", marginTop: 8 }}>
             This variant is {variant.status.replace("_", " ")} — edits here
@@ -2025,7 +2035,8 @@ function TimingField({ label, value, onFocusSeek, onCommit }: {
   }, [value, focused]);
   return (
     <input className={`mono ovtime${bad ? " bad" : ""}`} type="text"
-      value={txt} title={label} aria-label={label} spellCheck={false}
+      value={txt} aria-label={label} spellCheck={false}
+      title={`${label} — edges snap to scene boundaries within 0.2s; hold Alt to disable`}
       onFocus={() => { setFocused(true); onFocusSeek?.(); }}
       onChange={(e) => { setTxt(e.target.value); setBad(false); }}
       onKeyDown={(e) => {
@@ -2057,13 +2068,26 @@ function TimingField({ label, value, onFocusSeek, onCommit }: {
   );
 }
 
-function Acc({ title, sum, defaultOpen, children }: {
+function Acc({ title, sum, children }: {
   title: string; sum?: string; defaultOpen?: boolean; children: React.ReactNode;
 }) {
-  const [open, setOpen] = useState(!!defaultOpen);
+  // All sections load closed; a section the user opens stays open for the
+  // session (per user, sessionStorage), keyed by the section name.
+  const key = `acc:${title.split(" — ")[0]}`;
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    try { if (sessionStorage.getItem(key) === "1") setOpen(true); } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const toggle = () => {
+    setOpen((o) => {
+      try { sessionStorage.setItem(key, o ? "0" : "1"); } catch {}
+      return !o;
+    });
+  };
   return (
     <div className="acc" data-open={open ? "1" : "0"}>
-      <button className="acc-h" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button className="acc-h" aria-expanded={open} onClick={toggle}>
         {title} {sum && <span className="sum">{sum}</span>}<span className="cv" />
       </button>
       <div className="acc-b">{children}</div>

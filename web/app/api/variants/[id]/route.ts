@@ -65,6 +65,21 @@ export async function PATCH(
       );
       subtitlesTouched = true;
     }
+    if (body.export_ratios !== undefined) {
+      const KNOWN = ["9x16", "4x5", "1x1", "1.91x1"];
+      const set = Array.isArray(body.export_ratios)
+        ? KNOWN.filter((r) => body.export_ratios.includes(r))
+        : [];
+      if (!set.length) {
+        await client.query("ROLLBACK");
+        return NextResponse.json(
+          { error: "export set needs at least one ratio" }, { status: 400 });
+      }
+      // the export set is delivery config, not content — no stale mark
+      await client.query(
+        "UPDATE clip_variants SET export_ratios = $1 WHERE id = $2",
+        [set, id]);
+    }
     if (subtitlesTouched) await markStaleVariant(id, client);
     await client.query("COMMIT");
     return NextResponse.json({ ok: true });

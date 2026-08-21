@@ -1,5 +1,4 @@
 import { q } from "@/lib/db";
-import { Topbar } from "../ui";
 import Workbench from "./Workbench";
 
 export const dynamic = "force-dynamic";
@@ -33,11 +32,7 @@ export default async function ClipsPage({
 
   return (
     <>
-      <Topbar
-        title="Clip builder"
-        sub="Each row below the player is one variant. Click a row to load it; ↑↓ move, Enter renames, Space plays."
-      />
-      <section className="screen">
+      <section className="screen" style={{ paddingTop: 14 }}>
         <Workbench initialVariantId={initial} workerUp={workerUp} />
       </section>
     </>

@@ -1086,3 +1086,57 @@ table.lib-list tbody tr:hover td{background:var(--paper)}
 .sw.rainbow{background:conic-gradient(#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)}
 .eyedrop-layer{position:absolute;inset:0;z-index:60;cursor:crosshair;
   outline:2px dashed var(--signal);outline-offset:-2px}
+
+/* In/Out block inside the transport row */
+.transport .trim-blk{display:flex;align-items:center;gap:8px;font-size:10.5px;
+  color:var(--muted);padding-right:6px;border-right:1px solid var(--line);
+  margin-right:2px;white-space:nowrap}
+.transport .trim-blk .fld{display:flex;align-items:center;gap:4px}
+.transport .trim-blk input{width:86px;border:1px solid var(--line);border-radius:3px;
+  padding:2px 5px;font-size:10px;background:var(--paper);color:var(--ink-2)}
+.transport .trim-blk b{color:var(--ink);font-weight:600}
+
+/* Ratio tabs as the export set */
+.seg.rset{display:flex;align-items:stretch}
+.rtab{position:relative;display:inline-flex}
+.rtab .rx{position:absolute;top:-7px;right:-5px;width:14px;height:14px;line-height:11px;
+  font-size:10px;border-radius:50%;border:1px solid var(--line);background:var(--paper);
+  color:var(--muted);padding:0;display:none;z-index:3}
+.rtab:hover .rx{display:block}
+.rtab .rx:hover{border-color:#B00020;color:#B00020}
+.rtab.radd{position:relative}
+.rtab.radd>button{color:var(--muted);font-weight:700}
+.rtab.radd .addmenu{position:absolute;top:calc(100% + 4px);right:0;z-index:30}
+
+/* Export button + inline progress at the bottom of the variants strip */
+.btn.vexport{display:block;width:100%;margin-top:10px;padding:9px 14px;
+  background:var(--ink);color:var(--paper);border:1px solid var(--ink);
+  border-radius:var(--radius);font-weight:600;font-size:12px;cursor:pointer}
+.btn.vexport:hover{background:#2A2E36}
+.btn.vexport:disabled{opacity:.45;cursor:default}
+.vexp-prog{margin-top:8px;display:flex;flex-direction:column;gap:4px}
+.vexp-row{display:flex;align-items:center;gap:5px;font-size:10.5px}
+.vexp-nm{font-family:var(--mono);font-size:10px;color:var(--ink-2);
+  max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Layout glyph on the scene card caption */
+.lb .lyglyph{display:inline-flex;align-items:center;gap:4px;border:0;background:transparent;
+  padding:0 3px 0 0;font:inherit;color:inherit;cursor:pointer;border-radius:3px}
+.lb .lyglyph:hover{background:#EFEDE7;color:var(--ink)}
+.lb .lyglyph .mi{display:inline-flex;gap:1px}
+.lb .lyglyph .mi i{width:7px;height:9px;background:#59617A;border-radius:1px;display:inline-block}
+.lb .lyglyph .mi i.ast{background:#C9A96A}
+.lb .lyglyph .mi i.crd{background:var(--ink)}
+.addmenu.laymenu button[data-on="1"]{background:#F5F2E9}
+.addmenu.laymenu button:disabled{opacity:.5;cursor:default}
+
+/* Vendored text-layer fonts — the same files the worker burns with */
+@font-face{font-family:'Plus Jakarta Sans';src:url(/fonts/PlusJakartaSans-Variable.ttf) format('truetype');font-weight:200 800;font-display:swap}
+@font-face{font-family:'Inter';src:url(/fonts/Inter-Variable.ttf) format('truetype');font-weight:100 900;font-display:swap}
+@font-face{font-family:'Montserrat';src:url(/fonts/Montserrat-Variable.ttf) format('truetype');font-weight:100 900;font-display:swap}
+@font-face{font-family:'Poppins';src:url(/fonts/Poppins-Regular.ttf) format('truetype');font-weight:400;font-display:swap}
+@font-face{font-family:'Poppins';src:url(/fonts/Poppins-Bold.ttf) format('truetype');font-weight:700;font-display:swap}
+@font-face{font-family:'Poppins';src:url(/fonts/Poppins-ExtraBold.ttf) format('truetype');font-weight:800;font-display:swap}
+@font-face{font-family:'Bebas Neue';src:url(/fonts/BebasNeue-Regular.ttf) format('truetype');font-weight:400 800;font-display:swap}
+@font-face{font-family:'Playfair Display';src:url(/fonts/PlayfairDisplay-Variable.ttf) format('truetype');font-weight:400 900;font-display:swap}
+@font-face{font-family:'Space Grotesk';src:url(/fonts/SpaceGrotesk-Variable.ttf) format('truetype');font-weight:300 700;font-display:swap}

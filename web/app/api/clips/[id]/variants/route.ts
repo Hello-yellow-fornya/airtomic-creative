@@ -71,8 +71,8 @@ export async function POST(
 
     const ins = await client.query(
       `INSERT INTO clip_variants (clip_id, label, name, slug,
-                                  subtitle_preset_id, subtitle_overrides)
-       SELECT $1, $2, $3, $4, src.subtitle_preset_id, src.subtitle_overrides
+                                  subtitle_preset_id, subtitle_overrides, export_ratios)
+       SELECT $1, $2, $3, $4, src.subtitle_preset_id, src.subtitle_overrides, src.export_ratios
        FROM clip_variants src WHERE src.id = $5 RETURNING id`,
       [id, label, name, slug, srcVariant],
     );

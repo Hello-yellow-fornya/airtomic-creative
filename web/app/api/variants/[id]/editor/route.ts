@@ -19,6 +19,7 @@ export async function GET(
   const [variant] = await q<{
     id: string; label: string; name: string; status: string;
     render_stale: boolean;
+    export_ratios: string[];
     clip_id: string; clip_in: string; clip_out: string;
     subtitle_preset_id: string | null;
     subtitle_overrides: Record<string, unknown> | null;
@@ -29,6 +30,7 @@ export async function GET(
     ratios: string[] | null;
   }>(
     `SELECT cv.id::text, cv.label, cv.name, cv.status::text, cv.render_stale,
+            cv.export_ratios,
             c.id::text AS clip_id,
             c.source_in_s::text AS clip_in, c.source_out_s::text AS clip_out,
             cv.subtitle_preset_id::text, cv.subtitle_overrides,
@@ -131,6 +133,7 @@ export async function GET(
       q<{
         id: string; label: string; name: string; status: string;
         render_stale: boolean;
+        g_export_ratios: string[];
         sub_preset: string | null;
         sub_overrides: Record<string, unknown> | null;
         g_render_status: string | null; g_render_error: string | null;
@@ -140,6 +143,7 @@ export async function GET(
         sc_lifted: boolean | null; sc_audio: string | null;
       }>(
         `SELECT g.id::text, g.label, g.name, g.status::text, g.render_stale,
+                g.export_ratios AS g_export_ratios,
                 g.subtitle_preset_id::text AS sub_preset,
                 g.subtitle_overrides AS sub_overrides,
                 gj.status::text AS g_render_status, gj.error AS g_render_error,
@@ -210,7 +214,8 @@ export async function GET(
 
   const group: {
     id: string; label: string; name: string; status: string;
-    renderStale: boolean; ratios: string[];
+    renderStale: boolean; ratios: string[]; exportRatios: string[];
+    ratioStatus: { ratio: string; status: string }[];
     presetId: string | null; overrides: Record<string, unknown>;
     renderStatus: string | null; renderError: string | null;
     overlays: { id: string; text: string; start: number; end: number; position: string; style: string; sv: Record<string, unknown> | null }[];
@@ -226,6 +231,7 @@ export async function GET(
     if (!g) {
       g = { id: r.id, label: r.label, name: r.name, status: r.status,
             renderStale: r.render_stale, scenes: [],
+            exportRatios: r.g_export_ratios ?? [],
             presetId: r.sub_preset, overrides: r.sub_overrides ?? {},
             renderStatus: r.g_render_status, renderError: r.g_render_error,
             overlays: groupOverlays
@@ -244,7 +250,10 @@ export async function GET(
               })),
             ratios: groupRatios
               .filter((x) => x.vid === r.id && x.status === "done")
-              .map((x) => x.ratio) };
+              .map((x) => x.ratio),
+            ratioStatus: groupRatios
+              .filter((x) => x.vid === r.id)
+              .map((x) => ({ ratio: x.ratio, status: x.status })) };
       group.push(g);
     }
     if (r.sc_id) {
@@ -282,6 +291,7 @@ export async function GET(
       renderStatus: variant.render_status,
       renderError: variant.render_error,
       ratios: variant.ratios ?? [],
+      exportRatios: variant.export_ratios ?? [],
     },
     group,
     orphan,

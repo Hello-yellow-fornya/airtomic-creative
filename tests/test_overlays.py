@@ -169,3 +169,18 @@ def test_hex_to_ass_bgr_conversion():
     ass = build_overlay_ass([ov], {}, "9x16", 1080, 1920, 10)
     assert "&H00D57B3A&" in ass          # PrimaryColour, BGR order
     assert "&H0020FF10&" in ass          # OutlineColour, BGR order
+
+
+def test_font_family_burns_and_is_vendored():
+    from pathlib import Path
+    from worker.overlays import FONTS
+    ov = OV(sv=SV(vp=50, font="Space Grotesk"))
+    ass = build_overlay_ass([ov], {}, "9x16", 1080, 1920, 10)
+    assert "Style: Ov0,Space Grotesk," in ass
+    # unknown family never reaches the ASS — falls back to the default
+    bad = OV(sv=SV(vp=50, font="Comic Sans MS"))
+    assert "Comic Sans" not in build_overlay_ass([bad], {}, "9x16", 1080, 1920, 10)
+    # every offered family has a vendored file in the worker image dir
+    stems = " ".join(p.name for p in Path("worker/fonts").glob("*.ttf")).replace(" ", "")
+    for fam in FONTS:
+        assert fam.replace(" ", "") in stems, fam
