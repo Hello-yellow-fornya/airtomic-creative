@@ -15,6 +15,10 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import ColorPicker from "./ColorPicker";
+import {
+  clampTransform, DEFAULT_TRANSFORM, framedHigh, RATIO_SIZES,
+  type Reframe,
+} from "@/lib/reframe";
 
 type VariantInfo = {
   id: string; label: string; name: string; status: string;
@@ -22,12 +26,15 @@ type VariantInfo = {
   presetId: string | null; overrides: Record<string, unknown>;
   videoId: string | null; videoTitle?: string | null;
   videoDuration: number; srcW: number; srcH: number;
+  transforms?: Record<string, Reframe>;
+  staleRatios?: string[];
   renderStatus?: string | null; renderError?: string | null;
   ratios?: string[];
   exportRatios?: string[];
 };
 export type ComparePayload = {
   id: string; label: string; name: string; overlays: Ov[];
+  transforms?: Record<string, Reframe>;
 };
 type Scene = {
   id: string; idx: number; layout: string; in: number | null; out: number | null;
@@ -284,6 +291,8 @@ export default function Builder({
     setStale(renderStale);
     setExRatios(variant.exportRatios?.length ? variant.exportRatios : Object.keys(RATIOS));
     setAddRatioOpen(false);
+    setRfMap({ ...(variant.transforms ?? {}) });
+    setStaleR(variant.staleRatios ?? []);
     setPresetId(activePreset?.id ?? null);
     const o = { ...variant.overrides };
     delete o.fixes;
@@ -653,25 +662,27 @@ export default function Builder({
   }, [lines, tSrc]);
   const line = lineIdx >= 0 ? lines[lineIdx] : null;
 
-  // ----- crop -----
-  const box = cropBox(srcAr, bRatio);
-  const [localCrops, setLocalCrops] = useState<Record<string, { x: number; y: number }>>({});
-  const cropKey = scene ? `${scene.id}:${bRatio}` : "";
-  const storedCrop = scene
-    ? crops.find((c) => c.sceneId === scene.id && c.ratio === bRatio)
-    : undefined;
-  const cropPos = localCrops[cropKey] ??
-    (storedCrop
-      ? { x: storedCrop.x, y: storedCrop.y }
-      : { x: box.axis === "x" ? (1 - box.w) / 2 : 0, y: box.axis === "y" ? (1 - box.h) / 2 : 0 });
-  const hasCropSet = (sceneId: string, ratio: string) =>
-    !!localCrops[`${sceneId}:${ratio}`] || crops.some((c) => c.sceneId === sceneId && c.ratio === ratio);
+  // ----- reframe: one transform per (variant, ratio) -----
+  const [fw, fh] = RATIO_SIZES[bRatio] ?? [1080, 1920];
+  const srcW = variant.srcW > 20 ? variant.srcW : 1920;
+  const srcH = variant.srcH > 20 ? variant.srcH : 1080;
+  const [rfMap, setRfMap] = useState<Record<string, Reframe>>(
+    () => ({ ...(variant.transforms ?? {}) }));
+  const [staleR, setStaleR] = useState<string[]>(variant.staleRatios ?? []);
+  /** Unset ratios default from 9:16's transform re-solved (clamped) for
+   * the new frame — never from a blank. */
+  const rfFor = useCallback((ratio: string): Reframe => {
+    const [w, h] = RATIO_SIZES[ratio] ?? [1080, 1920];
+    const base = rfMap[ratio] ?? rfMap["9x16"] ?? DEFAULT_TRANSFORM;
+    return clampTransform({ ...DEFAULT_TRANSFORM, ...base }, srcW, srcH, w, h);
+  }, [rfMap, srcW, srcH]);
+  const rf = rfFor(bRatio);
+  const frameAr = fw / fh;
 
   const srcRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
 
-  // "drag to reframe" shows on the first hover only, then stays hidden —
-  // the old duplicate info banner under the transport is gone.
+  // "drag to reframe" shows on the first hover only, then stays hidden
   const [hintSeen, setHintSeen] = useState(true);
   useEffect(() => {
     setHintSeen(localStorage.getItem("reframeHintSeen") === "1");
@@ -683,80 +694,127 @@ export default function Builder({
     }
   };
 
-  async function saveCrop(pos: { x: number; y: number }) {
-    if (!scene) return;
-    const crop = box.axis === "x"
-      ? { x: pos.x, y: 0, w: box.w, h: box.h }
-      : { x: 0, y: pos.y, w: box.w, h: box.h };
-    await fetch(`/api/scenes/${scene.id}/crop`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ratio: bRatio, ...crop }),
-    });
-    setStale(true); // reframe is part of the render fingerprint
-    if (onDataChanged) onDataChanged(); else router.refresh();
-  }
+  const rfTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const commitRf = useCallback((t: Reframe, ratio: string) => {
+    if (rfTimer.current) clearTimeout(rfTimer.current);
+    rfTimer.current = setTimeout(() => {
+      void fetch(`/api/variants/${variant.id}/reframe`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ratio, ...t }),
+      });
+    }, 350);
+  }, [variant.id]);
+  /** Set the CURRENT ratio's transform: clamps, previews on the same
+   * tick, marks only this variant+ratio stale, debounces the PATCH. */
+  const setRf = useCallback((t: Reframe) => {
+    const clamped = clampTransform(t, srcW, srcH, fw, fh);
+    setRfMap((m) => ({ ...m, [bRatio]: clamped }));
+    setStaleR((r) => r.includes(bRatio) ? r : [...r, bRatio]);
+    commitRf(clamped, bRatio);
+  }, [bRatio, srcW, srcH, fw, fh, commitRf]);
 
-  /** Drag state lives in a ref, not React state, so the pointermove path
-   * has no render round-trip to race against. Move/up listeners attach to
-   * WINDOW for the duration of the drag — the drag keeps working even if
-   * setPointerCapture throws (some input devices) or the pointer leaves
-   * the element. The prototype's cropDrag, hardened. */
-  const dragRef = useRef<{
-    id: number; px: number; py: number; x: number; y: number;
-    last: { x: number; y: number };
-  } | null>(null);
+  const near = (a: number, b: number) => Math.abs(a - b) < 0.005;
+  const rfHigh = framedHigh(srcW, srcH, fw, fh);
+  const rfPreset = rf.mode === "fit" ? "fit"
+    : near(rf.x, 0) && near(rf.y, 0) && near(rf.scale, 1) ? "centre"
+    : near(rf.x, rfHigh.x) && near(rf.y, rfHigh.y) && near(rf.scale, rfHigh.scale) ? "high"
+    : "custom";
 
-  function onCropDown(e: React.PointerEvent) {
-    if (readOnly || !scene || scene.layout === "card") return;
+  // drag to pan (shift constrains to one axis); wheel/pinch to scale
+  // around the cursor; corner handles scale around the centre;
+  // double-click resets to Centre
+  const pinchRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  function onRfDown(e: React.PointerEvent) {
+    if (readOnly || !scene || scene.layout === "card" || rf.mode === "fit") return;
+    if ((e.target as Element).closest(".ovbox,.ovh,.rfh")) return;
     e.preventDefault();
-    try { e.currentTarget.setPointerCapture(e.pointerId); } catch {}
-    dragRef.current = {
-      id: e.pointerId, px: e.clientX, py: e.clientY,
-      x: cropPos.x, y: cropPos.y, last: { x: cropPos.x, y: cropPos.y },
-    };
+    const pid = e.pointerId;
+    pinchRef.current.set(pid, { x: e.clientX, y: e.clientY });
+    if (pinchRef.current.size > 1) return; // second finger: pinch handles it
+    try { (e.currentTarget as Element).setPointerCapture(pid); } catch {}
+    const start = rf;
+    const px0 = e.clientX, py0 = e.clientY;
+    let pinchD0: number | null = null;
+    let pinchT0 = start;
     setDragging(true);
-
     const onMove = (ev: PointerEvent) => {
-      const d = dragRef.current;
-      if (!d || ev.pointerId !== d.id || !srcRef.current) return;
-      const r = srcRef.current.getBoundingClientRect();
-      const next = box.axis === "x"
-        ? { x: Math.max(0, Math.min(1 - box.w, d.x + (ev.clientX - d.px) / r.width)), y: 0 }
-        : { x: 0, y: Math.max(0, Math.min(1 - box.h, d.y + (ev.clientY - d.py) / r.height)) };
-      d.last = next;
-      setLocalCrops((m) => ({ ...m, [cropKey]: next }));
+      const r = srcRef.current?.getBoundingClientRect();
+      if (!r) return;
+      if (pinchRef.current.has(ev.pointerId))
+        pinchRef.current.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+      if (pinchRef.current.size >= 2) {
+        const pts = [...pinchRef.current.values()];
+        const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        if (pinchD0 === null) { pinchD0 = d; pinchT0 = rfFor(bRatio); return; }
+        const k = d / pinchD0;
+        const mx = (pts[0].x + pts[1].x) / 2, my = (pts[0].y + pts[1].y) / 2;
+        const ux = (mx - r.left) / r.width - 0.5, uy = (my - r.top) / r.height - 0.5;
+        setRf({ ...pinchT0, scale: pinchT0.scale * k,
+          x: ux - k * (ux - pinchT0.x), y: uy - k * (uy - pinchT0.y) });
+        return;
+      }
+      if (ev.pointerId !== pid) return;
+      let dx = (ev.clientX - px0) / r.width;
+      let dy = (ev.clientY - py0) / r.height;
+      if (ev.shiftKey) { if (Math.abs(dx) >= Math.abs(dy)) dy = 0; else dx = 0; }
+      setRf({ ...start, x: start.x + dx, y: start.y + dy });
     };
     const onUp = (ev: PointerEvent) => {
-      const d = dragRef.current;
-      if (!d || ev.pointerId !== d.id) return;
-      dragRef.current = null;
-      setDragging(false);
+      pinchRef.current.delete(ev.pointerId);
+      if (ev.pointerId !== pid && pinchRef.current.size > 0) return;
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
-      void saveCrop(d.last);
+      pinchRef.current.clear();
+      setDragging(false);
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
   }
-  function onCropKey(e: React.KeyboardEvent) {
-    if (readOnly || !scene || scene.layout === "card") return;
+  function onRfWheel(e: React.WheelEvent) {
+    if (readOnly || !scene || scene.layout === "card" || rf.mode === "fit") return;
+    e.preventDefault();
+    const r = srcRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const k = Math.exp(-e.deltaY * 0.0015);
+    const ux = (e.clientX - r.left) / r.width - 0.5;
+    const uy = (e.clientY - r.top) / r.height - 0.5;
+    setRf({ ...rf, scale: rf.scale * k,
+      x: ux - k * (ux - rf.x), y: uy - k * (uy - rf.y) });
+  }
+  function onRfHandle(e: React.PointerEvent, cx: number, cy: number) {
+    if (readOnly || rf.mode === "fit") return;
+    e.preventDefault();
+    e.stopPropagation();
+    const pid = e.pointerId;
+    try { (e.currentTarget as Element).setPointerCapture(pid); } catch {}
+    const r = srcRef.current!.getBoundingClientRect();
+    const centre = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    const d0 = Math.max(20, Math.hypot(e.clientX - centre.x, e.clientY - centre.y));
+    const start = rf;
+    const onMove = (ev: PointerEvent) => {
+      if (ev.pointerId !== pid) return;
+      const k = Math.hypot(ev.clientX - centre.x, ev.clientY - centre.y) / d0;
+      setRf({ ...start, scale: start.scale * k, x: start.x * k, y: start.y * k });
+    };
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== pid) return;
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+  function onRfKey(e: React.KeyboardEvent) {
+    if (readOnly || !scene || scene.layout === "card" || rf.mode === "fit") return;
     const step = (e.shiftKey ? 5 : 1) / 100;
-    let next: { x: number; y: number } | null = null;
-    if (box.axis === "x") {
-      if (e.key === "ArrowLeft") next = { x: Math.max(0, cropPos.x - step), y: 0 };
-      if (e.key === "ArrowRight") next = { x: Math.min(1 - box.w, cropPos.x + step), y: 0 };
-    } else {
-      if (e.key === "ArrowUp") next = { x: 0, y: Math.max(0, cropPos.y - step) };
-      if (e.key === "ArrowDown") next = { x: 0, y: Math.min(1 - box.h, cropPos.y + step) };
-    }
-    if (next) {
-      e.preventDefault();
-      setLocalCrops((m) => ({ ...m, [cropKey]: next! }));
-      void saveCrop(next);
-    }
+    let next: Reframe | null = null;
+    if (e.key === "ArrowLeft") next = { ...rf, x: rf.x - step };
+    if (e.key === "ArrowRight") next = { ...rf, x: rf.x + step };
+    if (e.key === "ArrowUp") next = { ...rf, y: rf.y - step };
+    if (e.key === "ArrowDown") next = { ...rf, y: rf.y + step };
+    if (next) { e.preventDefault(); setRf(next); }
   }
 
   // ----- filmstrip -----
@@ -1188,7 +1246,13 @@ export default function Builder({
               {variant.renderStatus === "done" ? "rendered" : variant.renderStatus}
             </span>
           )}
-          {stale && <span className="tag flag" title="Changed since the last render">stale</span>}
+          {(stale || staleR.includes(bRatio)) && (
+            <span className="tag flag"
+              title={stale ? "Changed since the last render"
+                : `Reframe changed for ${RATIOS[bRatio].label} since its last render`}>
+              stale
+            </span>
+          )}
           {readOnly && <span className="tag flag">source removed</span>}
           {compare && !readOnly && (
             <button className="chip" data-on={compareOn ? "1" : undefined}
@@ -1205,7 +1269,7 @@ export default function Builder({
                   title={`${RATIOS[r].use} · ${RATIOS[r].px}`}
                   onClick={() => setBRatio(r)}>
                   {RATIOS[r].label}
-                  {scene && scene.layout !== "card" && hasCropSet(scene.id, r) ? " ●" : ""}
+                  {rfMap[r] ? " ●" : ""}
                 </button>
                 {exRatios.length > 1 && !readOnly && (
                   <button className="rx" aria-label={`Remove ${RATIOS[r].label} from the export set`}
@@ -1238,6 +1302,37 @@ export default function Builder({
             <input type="checkbox" checked={zones} onChange={(e) => setZones(e.target.checked)} />
             {" "}Safe zones
           </label>
+          {!readOnly && (
+            <div className="seg rfseg" title="Reframe presets for this ratio">
+              <button data-on={rfPreset === "centre" ? "1" : undefined}
+                onClick={() => setRf({ ...DEFAULT_TRANSFORM, fit_color: rf.fit_color })}>
+                Centre
+              </button>
+              <button data-on={rfPreset === "high" ? "1" : undefined}
+                title="Window at the top of the source — the old default"
+                onClick={() => setRf({ ...rfHigh, fit_color: rf.fit_color })}>
+                High
+              </button>
+              <button data-on={rfPreset === "fit" ? "1" : undefined}
+                title="Letterbox the whole source — colour from the brand swatches"
+                onClick={() => setRf({ ...rf, mode: "fit" })}>
+                Fit
+              </button>
+              {rfPreset === "custom" && (
+                <button data-on="1" style={{ cursor: "default" }}>Custom</button>
+              )}
+            </div>
+          )}
+          {rf.mode === "fit" && !readOnly && (
+            <span className="swatches rf-fit" title="Letterbox colour (stored per ratio)">
+              {["#0A0B0D", "#FFFFFF", "#FFC629", "#14403C"].map((c) => (
+                <button key={c} className="sw" style={{ background: c }}
+                  data-on={rf.fit_color.toUpperCase() === c ? "1" : undefined}
+                  aria-label={`Letterbox ${c}`}
+                  onClick={() => setRf({ ...rf, fit_color: c })} />
+              ))}
+            </span>
+          )}
           <span className="tag" title="Scene template shape">
             {shape === "custom" ? "Custom"
               : { plain: "Plain", product: "Product split", hookfirst: "Hook first + card" }[shape]}
@@ -1255,15 +1350,38 @@ export default function Builder({
         )}
         <div className={`stage${compareOn && compare ? " cmp" : ""}`}>
           {compareOn && compare && (
-            <div className="src cmp-src" style={{
-              aspectRatio: `${srcAr}`,
-              width: `min(48%, ${Math.round(420 * srcAr)}px)`,
-            }}>
-              {workerUp && (
-                <video ref={cmpVideoRef} src={`/api/media/${variant.videoId}`}
-                  preload="metadata" muted playsInline
-                  onLoadedMetadata={(e) => { e.currentTarget.currentTime = IN + t; }} />
-              )}
+            <div className="src cmp-src" style={(() => {
+              const ct = clampTransform(
+                { ...DEFAULT_TRANSFORM,
+                  ...(compare.transforms?.[bRatio] ?? compare.transforms?.["9x16"] ?? {}) },
+                srcW, srcH, fw, fh);
+              return {
+                aspectRatio: `${frameAr}`,
+                background: ct.mode === "fit" ? ct.fit_color : "#000",
+                width: `min(48%, ${Math.round(420 * frameAr)}px)`,
+              };
+            })()}>
+              {workerUp && (() => {
+                const ct = clampTransform(
+                  { ...DEFAULT_TRANSFORM,
+                    ...(compare.transforms?.[bRatio] ?? compare.transforms?.["9x16"] ?? {}) },
+                  srcW, srcH, fw, fh);
+                return (
+                  <video ref={cmpVideoRef} src={`/api/media/${variant.videoId}`}
+                    preload="metadata" muted playsInline
+                    style={{
+                      position: "absolute",
+                      width: ct.mode === "fit"
+                        ? `${Math.min(1, srcAr / frameAr) * 100}%`
+                        : `${ct.scale * Math.max(1, srcAr / frameAr) * 100}%`,
+                      height: "auto", maxWidth: "none",
+                      left: ct.mode === "fit" ? "50%" : `${50 + ct.x * 100}%`,
+                      top: ct.mode === "fit" ? "50%" : `${50 + ct.y * 100}%`,
+                      transform: "translate(-50%,-50%)",
+                    }}
+                    onLoadedMetadata={(e) => { e.currentTarget.currentTime = IN + t; }} />
+                );
+              })()}
               {compare.overlays.filter((o) => t >= o.start && t < o.end).map((o) => {
                 const cfg = ovResolved(o);
                 const cpl = ovPlace(o, bRatio);
@@ -1297,10 +1415,11 @@ export default function Builder({
               scales into the freed height; the cap still keeps the
               filmstrip + scenes strip on a 1080p screen. */}
           <div className="src" ref={srcRef} style={{
-            aspectRatio: `${srcAr}`,
+            aspectRatio: `${frameAr}`,
+            background: rf.mode === "fit" ? rf.fit_color : "#000",
             width: compareOn && compare
-              ? `min(48%, ${Math.round(420 * srcAr)}px)`
-              : `min(100%, 540px, ${Math.round(420 * srcAr)}px)`,
+              ? `min(48%, ${Math.round(420 * frameAr)}px)`
+              : `min(100%, 540px, ${Math.round(420 * frameAr)}px)`,
           }}>
             {workerUp && !videoErr ? (
               <video
@@ -1309,6 +1428,16 @@ export default function Builder({
                 crossOrigin="anonymous"
                 preload="metadata"
                 playsInline
+                style={{
+                  position: "absolute",
+                  width: rf.mode === "fit"
+                    ? `${Math.min(1, srcAr / frameAr) * 100}%`
+                    : `${rf.scale * Math.max(1, srcAr / frameAr) * 100}%`,
+                  height: "auto", maxWidth: "none",
+                  left: rf.mode === "fit" ? "50%" : `${50 + rf.x * 100}%`,
+                  top: rf.mode === "fit" ? "50%" : `${50 + rf.y * 100}%`,
+                  transform: "translate(-50%,-50%)",
+                }}
                 onLoadedMetadata={() => { if (videoRef.current) videoRef.current.currentTime = IN + t; }}
                 onError={() => setVideoErr(true)}
               />
@@ -1447,34 +1576,34 @@ export default function Builder({
               />
             )}
 
-            {/* crop overlay — direct manipulation */}
+            {/* reframe layer: drag pans, wheel/pinch scales around the
+                cursor, corner handles scale around the centre, double-click
+                resets, arrows nudge 1% (shift 5%) */}
             {scene && scene.layout !== "card" && (
               <div
-                className={`crop${dragging ? " drag" : ""}${zones ? " zones" : ""}`}
+                className={`rf-layer${dragging ? " drag" : ""}${zones ? " zones" : ""}`}
                 tabIndex={0}
-                role="slider"
-                aria-label="Reframe crop"
-                style={{
-                  width: `${box.w * 100}%`,
-                  height: `${box.h * 100}%`,
-                  left: `${(box.axis === "x" ? cropPos.x : 0) * 100}%`,
-                  top: `${(box.axis === "y" ? cropPos.y : 0) * 100}%`,
-                }}
-                onPointerDown={onCropDown}
+                role="application"
+                aria-label="Reframe — drag to pan, scroll to scale"
+                onPointerDown={onRfDown}
+                onWheel={onRfWheel}
+                onDoubleClick={() => setRf({ ...DEFAULT_TRANSFORM })}
                 onPointerLeave={onCropLeave}
-                onKeyDown={onCropKey}
+                onKeyDown={onRfKey}
               >
-                <div className="thirds">
-                  <i className="v" style={{ left: "33.33%" }} /><i className="v" style={{ left: "66.66%" }} />
-                  <i className="h" style={{ top: "33.33%" }} /><i className="h" style={{ top: "66.66%" }} />
-                </div>
-                <b className="br tl" /><b className="br tr" /><b className="br bl" /><b className="br br2" />
                 <div className="zone t" style={{ height: `${sz.t}%` }}><span>TOP</span></div>
                 <div className="zone b" style={{ height: `${sz.b}%` }}><span>BOTTOM</span></div>
+                {!readOnly && rf.mode !== "fit" && (
+                  <>
+                    <b className="rfh tl" onPointerDown={(e) => onRfHandle(e, -1, -1)} />
+                    <b className="rfh tr" onPointerDown={(e) => onRfHandle(e, 1, -1)} />
+                    <b className="rfh bl" onPointerDown={(e) => onRfHandle(e, -1, 1)} />
+                    <b className="rfh br2" onPointerDown={(e) => onRfHandle(e, 1, 1)} />
+                  </>
+                )}
                 {!hintSeen && (
                   <div className="crop-hint">
-                    drag to reframe · {RATIOS[bRatio].label}
-                    {box.axis === "y" ? " · vertical axis" : ""}
+                    drag to pan · scroll to scale · double-click resets
                   </div>
                 )}
               </div>

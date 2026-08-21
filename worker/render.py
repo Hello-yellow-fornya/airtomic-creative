@@ -24,7 +24,7 @@ from typing import Any
 
 import psycopg
 
-from . import overlays, r2, subtitles
+from . import overlays, r2, reframe, subtitles
 from .config import Config
 
 # Output pixel sizes per output_ratio (docs/prototype.html RATIOS).
@@ -66,8 +66,10 @@ def handle(conn: psycopg.Connection, cfg: Config, s3, job: dict[str, Any]) -> No
             )
 
     conn.execute(
-        "UPDATE clip_variants SET export_uri = %s WHERE id = %s",
-        (r2.make_uri(cfg.r2_bucket, key), variant_id),
+        """UPDATE clip_variants SET export_uri = %s,
+               stale_ratios = array_remove(stale_ratios, %s)
+           WHERE id = %s""",
+        (r2.make_uri(cfg.r2_bucket, key), ratio, variant_id),
     )
 
 
@@ -107,13 +109,21 @@ def render_variant(conn: psycopg.Connection, cfg: Config, s3, variant_id: str,
     if not scenes:
         raise RenderError("variant has no scenes")
 
-    crops = {
-        row["scene_id"]: row
-        for row in conn.execute(
-            "SELECT * FROM scene_crops WHERE ratio = %s AND scene_id = ANY(%s)",
-            (ratio, [s["id"] for s in scenes]),
-        ).fetchall()
-    }
+    tr = conn.execute(
+        "SELECT * FROM variant_transforms WHERE variant_id = %s AND ratio = %s",
+        (variant_id, ratio),
+    ).fetchone()
+    if tr is None and ratio != "9x16":
+        # unset ratios default from 9:16's transform, re-solved for the
+        # new frame (the transform semantics are frame-relative already)
+        tr = conn.execute(
+            "SELECT * FROM variant_transforms WHERE variant_id = %s AND ratio = '9x16'",
+            (variant_id,),
+        ).fetchone()
+    transform = ({
+        "x": float(tr["tx"]), "y": float(tr["ty"]), "scale": float(tr["scale"]),
+        "mode": tr["mode"], "fit_color": tr["fit_color"],
+    } if tr else dict(reframe.DEFAULT_TRANSFORM))
 
     src_bucket, src_key = r2.parse_uri(video["storage_uri"])
     src_path = str(Path(workdir) / Path(src_key).name)
@@ -180,7 +190,8 @@ def render_variant(conn: psycopg.Connection, cfg: Config, s3, variant_id: str,
 
     out_path = str(Path(workdir) / f"render_{ratio}.mp4")
     cmd = _build_command(
-        scenes, crops, assets, src_path, src_ar, target_w, target_h,
+        scenes, transform, assets, src_path,
+        float(video["width"]), float(video["height"]), target_w, target_h,
         ass_path, out_path, overlay_ass_path=overlay_ass_path,
     )
     proc = subprocess.run(cmd, capture_output=True, text=True)
@@ -260,10 +271,22 @@ def default_crop(src_ar: float, window_ar: float) -> dict[str, float]:
     return {"x": 0.0, "y": (1 - h) / 2, "w": 1.0, "h": h}
 
 
-def _crop_dict(row) -> dict[str, float] | None:
-    if row is None:
-        return None
-    return {k: float(row[f"crop_{k}"]) for k in ("x", "y", "w", "h")}
+def _window_chain(transform: dict, src_w: float, src_h: float,
+                  out_w: int, out_h: int) -> str:
+    """The scale+crop (or scale+pad for Fit) chain for one panel, derived
+    from the SAME transform_to_window the preview CSS uses."""
+    if transform.get("mode") == "fit":
+        colour = str(transform.get("fit_color") or "#0A0B0D").lstrip("#")
+        return (
+            f"scale={out_w}:{out_h}:force_original_aspect_ratio=decrease,"
+            f"pad={out_w}:{out_h}:(ow-iw)/2:(oh-ih)/2:color=0x{colour},"
+            f"fps={FPS},setsar=1,format=yuv420p"
+        )
+    # same clamp the preview applies: the frame is never uncovered
+    t = reframe.clamp_transform(transform, src_w, src_h, out_w, out_h)
+    win = reframe.transform_to_window(t, src_w, src_h, out_w, out_h)
+    win = {k: max(0.0, min(1.0, v)) for k, v in win.items()}
+    return _crop_chain(win, out_w, out_h)
 
 
 def _mirror_crop(crop: dict[str, float]) -> dict[str, float]:
@@ -292,7 +315,8 @@ def _silence(dur: float, label: str) -> str:
 
 
 def _build_command(
-    scenes, crops, assets, src_path: str, src_ar: float,
+    scenes, transform, assets, src_path: str,
+    src_w: float, src_h: float,
     target_w: int, target_h: int, ass_path: str, out_path: str,
     overlay_ass_path: str | None = None,
 ) -> list[str]:
@@ -347,23 +371,20 @@ def _build_command(
             filters.append(_silence(dur, f"a{i}"))  # assets are muted
         else:
             s_in, s_out = float(s["source_in_s"]), float(s["source_out_s"])
-            crop_row = _crop_dict(crops.get(s["id"]))
 
             if layout == "full":
-                crop = crop_row or default_crop(src_ar, target_w / target_h)
                 filters.append(
                     f"[sv{next(sv)}]trim={s_in:.3f}:{s_out:.3f},setpts=PTS-STARTPTS,"
-                    f"{_crop_chain(crop, target_w, target_h)}[v{i}]"
+                    f"{_window_chain(transform, src_w, src_h, target_w, target_h)}[v{i}]"
                 )
             elif layout in ("split_product", "split_speakers"):
                 split_ratio = float(s["split_ratio"] or 0.5)
                 upper_h = int(round(target_h * split_ratio / 2) * 2)
                 lower_h = target_h - upper_h
 
-                crop = crop_row or default_crop(src_ar, target_w / upper_h)
                 filters.append(
                     f"[sv{next(sv)}]trim={s_in:.3f}:{s_out:.3f},setpts=PTS-STARTPTS,"
-                    f"{_crop_chain(crop, target_w, upper_h)}[v{i}t]"
+                    f"{_window_chain(transform, src_w, src_h, target_w, upper_h)}[v{i}t]"
                 )
                 if layout == "split_product":
                     ai = _asset_input(s, assets, input_index, "split_product")
@@ -372,13 +393,14 @@ def _build_command(
                         f"trim=0:{dur:.3f},setpts=PTS-STARTPTS[v{i}b]"
                     )
                 else:
-                    mirror = _mirror_crop(
-                        crop_row or default_crop(src_ar, target_w / lower_h)
-                    )
+                    lower_win = _mirror_crop(reframe.transform_to_window(
+                        transform if transform.get("mode") != "fit"
+                        else reframe.DEFAULT_TRANSFORM,
+                        src_w, src_h, target_w, lower_h))
                     filters.append(
                         f"[sv{next(sv)}]trim={s_in:.3f}:{s_out:.3f},"
                         f"setpts=PTS-STARTPTS,"
-                        f"{_crop_chain(mirror, target_w, lower_h)}[v{i}b]"
+                        f"{_crop_chain(lower_win, target_w, lower_h)}[v{i}b]"
                     )
                 filters.append(f"[v{i}t][v{i}b]vstack=inputs=2[v{i}]")
             else:

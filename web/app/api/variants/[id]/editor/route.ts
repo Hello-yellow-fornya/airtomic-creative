@@ -20,6 +20,7 @@ export async function GET(
     id: string; label: string; name: string; status: string;
     render_stale: boolean;
     export_ratios: string[];
+    stale_ratios: string[];
     clip_id: string; clip_in: string; clip_out: string;
     subtitle_preset_id: string | null;
     subtitle_overrides: Record<string, unknown> | null;
@@ -30,7 +31,7 @@ export async function GET(
     ratios: string[] | null;
   }>(
     `SELECT cv.id::text, cv.label, cv.name, cv.status::text, cv.render_stale,
-            cv.export_ratios,
+            cv.export_ratios, cv.stale_ratios,
             c.id::text AS clip_id,
             c.source_in_s::text AS clip_in, c.source_out_s::text AS clip_out,
             cv.subtitle_preset_id::text, cv.subtitle_overrides,
@@ -134,6 +135,7 @@ export async function GET(
         id: string; label: string; name: string; status: string;
         render_stale: boolean;
         g_export_ratios: string[];
+        g_stale_ratios: string[];
         sub_preset: string | null;
         sub_overrides: Record<string, unknown> | null;
         g_render_status: string | null; g_render_error: string | null;
@@ -144,6 +146,7 @@ export async function GET(
       }>(
         `SELECT g.id::text, g.label, g.name, g.status::text, g.render_stale,
                 g.export_ratios AS g_export_ratios,
+                g.stale_ratios AS g_stale_ratios,
                 g.subtitle_preset_id::text AS sub_preset,
                 g.subtitle_overrides AS sub_overrides,
                 gj.status::text AS g_render_status, gj.error AS g_render_error,
@@ -176,6 +179,23 @@ export async function GET(
       : "SELECT NULL::text AS scene_id, NULL, NULL, NULL, NULL, NULL WHERE false",
     scenes.length ? [scenes.map((s) => s.id)] : [],
   );
+
+  const groupTransforms = await q<{
+    vid: string; ratio: string; tx: string; ty: string; scale: string;
+    mode: string; fit_color: string;
+  }>(
+    `SELECT variant_id::text AS vid, ratio::text, tx::text, ty::text,
+            scale::text, mode, fit_color
+     FROM variant_transforms
+     WHERE variant_id IN (SELECT id FROM clip_variants WHERE clip_id = $1)`,
+    [variant.clip_id],
+  );
+  const transformsFor = (vid: string) =>
+    Object.fromEntries(groupTransforms.filter((t) => t.vid === vid).map((t) => [
+      t.ratio,
+      { x: parseFloat(t.tx), y: parseFloat(t.ty), scale: parseFloat(t.scale),
+        mode: t.mode as "cover" | "fit", fit_color: t.fit_color },
+    ]));
 
   const [groupOverlays, groupCrops] = await Promise.all([
     q<{
@@ -215,6 +235,8 @@ export async function GET(
   const group: {
     id: string; label: string; name: string; status: string;
     renderStale: boolean; ratios: string[]; exportRatios: string[];
+    staleRatios: string[];
+    transforms: Record<string, { x: number; y: number; scale: number; mode: "cover" | "fit"; fit_color: string }>;
     ratioStatus: { ratio: string; status: string }[];
     presetId: string | null; overrides: Record<string, unknown>;
     renderStatus: string | null; renderError: string | null;
@@ -232,6 +254,8 @@ export async function GET(
       g = { id: r.id, label: r.label, name: r.name, status: r.status,
             renderStale: r.render_stale, scenes: [],
             exportRatios: r.g_export_ratios ?? [],
+            staleRatios: r.g_stale_ratios ?? [],
+            transforms: transformsFor(r.id),
             presetId: r.sub_preset, overrides: r.sub_overrides ?? {},
             renderStatus: r.g_render_status, renderError: r.g_render_error,
             overlays: groupOverlays
@@ -292,6 +316,8 @@ export async function GET(
       renderError: variant.render_error,
       ratios: variant.ratios ?? [],
       exportRatios: variant.export_ratios ?? [],
+      staleRatios: variant.stale_ratios ?? [],
+      transforms: transformsFor(variant.id),
     },
     group,
     orphan,
@@ -327,6 +353,7 @@ export async function GET(
           id: compare[0].id,
           label: compare[0].label,
           name: compare[0].name,
+          transforms: transformsFor(compare[0].id),
           overlays: compare
             .filter((r) => r.ov_text !== null)
             .map((r) => ({

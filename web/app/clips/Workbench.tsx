@@ -24,6 +24,8 @@ type GroupScene = {
 type GroupVariant = {
   id: string; label: string; name: string; status: string;
   renderStale: boolean; ratios: string[]; exportRatios: string[];
+  staleRatios: string[];
+  transforms: Record<string, { x: number; y: number; scale: number; mode: "cover" | "fit"; fit_color: string }>;
   ratioStatus: { ratio: string; status: string }[]; scenes: GroupScene[];
   presetId: string | null; overrides: Record<string, unknown>;
   renderStatus: string | null; renderError: string | null;
@@ -41,6 +43,8 @@ type EditorPayload = {
     orphan: boolean;
     renderStatus: string | null; renderError: string | null; ratios: string[];
     exportRatios: string[];
+    staleRatios: string[];
+    transforms: Record<string, { x: number; y: number; scale: number; mode: "cover" | "fit"; fit_color: string }>;
   };
   scenes: {
     id: string; idx: number; layout: string; in: number | null;
@@ -151,13 +155,15 @@ export default function Workbench({ initialVariantId, workerUp }: {
         presetId: g.presetId, overrides: g.overrides,
         renderStatus: g.renderStatus, renderError: g.renderError,
         ratios: g.ratios, exportRatios: g.exportRatios,
+        staleRatios: g.staleRatios, transforms: g.transforms,
       },
       scenes: g.scenes.map((s) => ({ ...s })),
       crops: g.crops,
       overlays: g.overlays,
       renderStale: g.renderStale,
       compare: !base.orphan && a && a.id !== id
-        ? { id: a.id, label: a.label, name: a.name, overlays: a.overlays }
+        ? { id: a.id, label: a.label, name: a.name, overlays: a.overlays,
+            transforms: a.transforms }
         : null,
     };
   }, [payload]);
@@ -402,9 +408,11 @@ export default function Workbench({ initialVariantId, workerUp }: {
       ? orderedRows.filter((r) => checked.has(r.id))
       : orderedRows;
     if (!targets.length) return;
-    // stale variants re-render first
+    // stale variants re-render first (whole-variant or any stale ratio)
+    const isStale = (g: GroupVariant) =>
+      g.renderStale || (g.staleRatios?.length ?? 0) > 0;
     const ordered = [...targets].sort(
-      (a, b) => Number(b.renderStale) - Number(a.renderStale));
+      (a, b) => Number(isStale(b)) - Number(isStale(a)));
     setBusy(true);
     const jobs: { variantId: string; ratio: string }[] = [];
     const errs: string[] = [];

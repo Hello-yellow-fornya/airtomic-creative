@@ -78,6 +78,13 @@ export async function POST(
     );
     const newId = ins.rows[0].id;
 
+    await client.query(
+      `INSERT INTO variant_transforms (variant_id, ratio, tx, ty, scale, mode, fit_color)
+       SELECT $1, ratio, tx, ty, scale, mode, fit_color
+       FROM variant_transforms WHERE variant_id = $2`,
+      [newId, srcVariant],
+    );
+
     // overlays are variant-level: the duplicate inherits them as a start
     await client.query(
       `INSERT INTO clip_overlays (variant_id, idx, text, start_s, end_s, position, style, sv)
