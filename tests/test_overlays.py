@@ -36,18 +36,21 @@ def test_positions_respect_9x16_safe_zones():
     assert 0.66 <= lt <= 0.84                        # above the 16% bottom zone
 
 
-def test_ass_has_style_and_event_per_overlay():
+def test_ass_has_drawing_plus_text_event_per_bg_overlay():
     ass = build_overlay_ass([OV(), OV("CTA", 5, 8, "lower_third", "cta")],
                             STYLES, "9x16", 1080, 1920, 10.0)
-    assert ass.count("Dialogue:") == 2
+    # background targets burn as a \p1 rounded-rect drawing UNDER the text
+    assert ass.count("Dialogue:") == 4          # (drawing + text) x 2
+    assert ass.count("\\p1}") == 2
     assert "Style: Ov0,Plus Jakarta Sans,58," in ass
-    # hook: white text, dark box with alpha (0.78 -> a=56 -> 0x38)
+    # hook: white text; dark box colour with alpha 0.78 -> 0x38 on the drawing
     assert "&H00FFFFFF&" in ass
-    assert "&H380D0B0A&" in ass
-    # cta: opaque brand yellow box behind dark text
-    assert "&H0029C6FF&" in ass
-    # overlays sit on layer 1, above the subtitle layer 0
-    assert "Dialogue: 1," in ass
+    assert "\\1c&H380D0B0A&" in ass
+    assert "\\1a&H38&" in ass
+    # cta: opaque brand yellow drawing behind dark text
+    assert "\\1c&H0029C6FF&" in ass
+    # drawing on layer 1, its text above on layer 2, subtitles stay at 0
+    assert "Dialogue: 1," in ass and "Dialogue: 2," in ass
 
 
 def test_multiline_and_brace_escaping():
@@ -59,7 +62,7 @@ def test_multiline_and_brace_escaping():
 def test_event_clamped_to_clip_duration_and_zero_len_dropped():
     ass = build_overlay_ass([OV(start=8, end=20), OV(start=12, end=15)],
                             STYLES, "9x16", 1080, 1920, 10.0)
-    assert ass.count("Dialogue:") == 1               # second is fully past the end
+    assert ass.count("Dialogue:") == 2               # drawing + text; 2nd overlay dropped
     assert "0:00:08.00,0:00:10.00" in ass
 
 
@@ -130,12 +133,25 @@ def test_pos_matches_stored_fractions_per_ratio():
     assert f"\\pos({round(0.30 * 1080)},{round(0.40 * 1350)})" in a45
 
 
-def test_width_becomes_wrap_margins_and_q0():
-    ov = OV(sv=SV(vp=50, xp=50, w=60))
-    ass = build_overlay_ass([ov], {}, "9x16", 1080, 1920, 10)
-    margin = round((1 - 0.60) * 1080 / 2)   # 216 per side
-    assert f",,{margin},{margin},0,," in ass
-    assert "\\q0\\pos" in ass
+def test_width_wraps_deterministically_within_box():
+    long = "your skin barrier needs less than you think it does honestly"
+    narrow = build_overlay_ass([OV(long, sv=SV(vp=50, xp=50, w=40))], {}, "9x16", 1080, 1920, 10)
+    wide = build_overlay_ass([OV(long, sv=SV(vp=50, xp=50, w=100))], {}, "9x16", 1080, 1920, 10)
+    # text is pre-wrapped (\q2 + explicit \N) so the drawn box matches
+    assert "\\q2\\pos" in narrow
+    assert narrow.count("\\N") > wide.count("\\N")
+
+
+def test_radius_shapes_the_drawing():
+    r0 = build_overlay_ass([OV(sv=SV(vp=50, bg="pill", radius=0))], {}, "9x16", 1080, 1920, 10)
+    r8 = build_overlay_ass([OV(sv=SV(vp=50, bg="pill", radius=8))], {}, "9x16", 1080, 1920, 10)
+    d0 = next(l for l in r0.splitlines() if "\\p1}" in l)
+    d8 = next(l for l in r8.splitlines() if "\\p1}" in l)
+    assert " b " not in d0          # radius 0: plain rectangle
+    assert " b " in d8              # radius: bezier corners
+    # radius scales with output width like fs (8 at 1080 -> ~8.9 at 1200)
+    r191 = build_overlay_ass([OV(sv=SV(vp=50, bg="pill", radius=40))], {}, "1.91x1", 1200, 628, 10)
+    assert " b " in next(l for l in r191.splitlines() if "\\p1}" in l)
 
 
 def test_collision_respects_horizontal_extent():

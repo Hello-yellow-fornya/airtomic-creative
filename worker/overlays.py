@@ -84,6 +84,7 @@ def resolve_cfg(ov: dict[str, Any],
             "bg_alpha": float(sv.get("bg_alpha", 0.75)),
             "caps": bool(sv.get("caps")),
             "weight": int(sv.get("weight", 800)),
+            "radius": max(0.0, min(40.0, float(sv.get("radius", 8)))),
             "pad": 14,
         }
     cfg = {**_DEFAULT_STYLE, **((styles or {}).get(str(ov.get("style") or "hook")) or {})}
@@ -103,6 +104,7 @@ def resolve_cfg(ov: dict[str, Any],
         "bg_alpha": float(cfg.get("box_alpha", 0.75)),
         "caps": bool(cfg.get("uppercase")),
         "weight": int(cfg.get("weight", 700)),
+        "radius": max(0.0, min(40.0, float(cfg.get("radius", 8)))),
         "pad": float(cfg.get("pad", 14)),
     }
 
@@ -138,8 +140,29 @@ def overlay_vp(ov: dict[str, Any],
 
 
 def overlay_band(y: float, rel_height: float = 0.10) -> tuple[float, float]:
-    """Approximate vertical band [top, bottom] an overlay occupies."""
+    """Vertical band [top, bottom] an overlay occupies."""
     return (y - rel_height / 2, y + rel_height / 2)
+
+
+def drawn_box_height_frac(ov: dict[str, Any],
+                          styles: dict[str, dict[str, Any]] | None,
+                          ratio: str) -> float:
+    """Height of the DRAWN background box as a fraction of frame height —
+    the collision rule measures the real box, not a fixed band."""
+    from .reframe import RATIO_SIZES
+    play_w, play_h = RATIO_SIZES.get(ratio, (1080, 1920))
+    cfg = resolve_cfg(ov, styles)
+    fontsize = max(1, round(cfg["fs"] * play_w / 1080))
+    pad = round(float(cfg["pad"]) * play_w / 1080)
+    _, _, wfrac = placement(ov, styles, ratio)
+    raw = str(ov["text"]).upper() if cfg["caps"] else str(ov["text"])
+    try:
+        lines, _, line_h = _layout_lines(
+            raw, cfg["font"], cfg["weight"], fontsize,
+            max(40.0, wfrac * play_w - 2 * pad), cfg["wpl"])
+        return (len(lines) * line_h + 2 * pad) / play_h
+    except Exception:
+        return 0.10
 
 
 def _ass_colour(hex_colour: str, alpha: float = 1.0) -> str:
@@ -161,6 +184,88 @@ def _ts(seconds: float) -> str:
     return f"{h}:{m:02d}:{s:05.2f}"
 
 
+_FONT_FILES = {
+    "Plus Jakarta Sans": ["PlusJakartaSans-Variable.ttf"],
+    "Inter": ["Inter-Variable.ttf"],
+    "Montserrat": ["Montserrat-Variable.ttf"],
+    "Poppins": ["Poppins-Regular.ttf", "Poppins-Bold.ttf", "Poppins-ExtraBold.ttf"],
+    "Bebas Neue": ["BebasNeue-Regular.ttf"],
+    "Playfair Display": ["PlayfairDisplay-Variable.ttf"],
+    "Space Grotesk": ["SpaceGrotesk-Variable.ttf"],
+}
+
+
+def _pil_font(family: str, weight: int, fs_px: int):
+    """Best-effort PIL font for measuring the text block the drawing
+    wraps. Variable fonts get the weight axis; Poppins picks the static
+    face. Padding absorbs the small remaining mismatch with libass."""
+    from pathlib import Path
+    from PIL import ImageFont
+    files = _FONT_FILES.get(family) or _FONT_FILES["Plus Jakarta Sans"]
+    name = files[0]
+    if len(files) > 1:  # static faces: pick by weight
+        name = files[2] if weight >= 800 else files[1] if weight >= 600 else files[0]
+    f = ImageFont.truetype(str(Path(__file__).parent / "fonts" / name), fs_px)
+    try:
+        f.set_variation_by_axes([weight])
+    except Exception:
+        pass
+    return f
+
+
+def _layout_lines(text: str, family: str, weight: int, fs_px: int,
+                  max_w_px: float, wpl: int | None) -> tuple[list[str], float, float]:
+    r"""Deterministic wrap: within max_w_px, never more than wpl words per
+    line, honouring the author's manual breaks. Returns (lines,
+    max_line_width_px, line_height_px). The text event uses \q2 with
+    explicit \N so libass renders EXACTLY these lines — the drawn box
+    cannot drift from the text."""
+    font = _pil_font(family, weight, fs_px)
+    ascent, descent = font.getmetrics()
+    line_h = ascent + descent
+    width = lambda s: font.getbbox(s)[2] - font.getbbox(s)[0] if s else 0.0  # noqa: E731
+    lines: list[str] = []
+    for para in text.replace("\r\n", "\n").split("\n"):
+        words = para.split()
+        if not words:
+            lines.append("")
+            continue
+        cur: list[str] = []
+        for w in words:
+            cand = " ".join(cur + [w])
+            if cur and (width(cand) > max_w_px or (wpl and len(cur) >= wpl)):
+                lines.append(" ".join(cur))
+                cur = [w]
+            else:
+                cur.append(w)
+        if cur:
+            lines.append(" ".join(cur))
+    maxw = max((width(ln) for ln in lines), default=0.0)
+    return lines, maxw, float(line_h)
+
+
+def _rounded_rect_path(w: float, h: float, r: float) -> str:
+    r"""ASS \p1 drawing: rounded rectangle from (0,0) to (w,h), corner
+    radius r, cubic corners at kappa. Coordinates are integers — script
+    pixels are plenty at 1080+."""
+    r = max(0.0, min(r, w / 2, h / 2))
+    k = r * 0.5523
+    i = lambda v: str(int(round(v)))  # noqa: E731
+    if r <= 0:
+        return f"m 0 0 l {i(w)} 0 {i(w)} {i(h)} 0 {i(h)}"
+    return (
+        f"m {i(r)} 0 "
+        f"l {i(w - r)} 0 "
+        f"b {i(w - r + k)} 0 {i(w)} {i(r - k)} {i(w)} {i(r)} "
+        f"l {i(w)} {i(h - r)} "
+        f"b {i(w)} {i(h - r + k)} {i(w - r + k)} {i(h)} {i(w - r)} {i(h)} "
+        f"l {i(r)} {i(h)} "
+        f"b {i(r - k)} {i(h)} 0 {i(h - r + k)} 0 {i(h - r)} "
+        f"l 0 {i(r)} "
+        f"b 0 {i(r - k)} {i(r - k)} 0 {i(r)} 0"
+    )
+
+
 def _wrap(text: str, wpl: int | None) -> str:
     """words-per-line rewrap; None keeps the author's manual line breaks."""
     if not wpl:
@@ -178,10 +283,11 @@ def build_overlay_ass(
     play_h: int,
     clip_dur: float,
 ) -> str:
-    """One ASS style + one Dialogue event per overlay, from each overlay's
-    resolved values. Multi-line text uses \\N. Pill and box both burn as
-    BorderStyle 3 (libass has no rounded corners); pill differs only in
-    the preview chrome."""
+    """Per overlay: a background-less text event, and — when the target
+    has a background — a rounded-rect \\p1 drawing event beneath it
+    (BorderStyle 3 has no corner radius and seams between lines). The
+    drawing is sized from the SAME deterministic line layout the text
+    event renders (\\q2 + explicit \\N), so box and text cannot drift."""
     style_lines = []
     events = []
     for i, ov in enumerate(overlays):
@@ -190,20 +296,17 @@ def build_overlay_ass(
         fontsize = max(1, round(cfg["fs"] * play_w / 1080))
         pad = round(float(cfg["pad"]) * play_w / 1080)
         primary = _ass_colour(cfg["color"])
-        if cfg["bg"] in ("pill", "box"):
-            border_style = 3
-            back = _ass_colour(cfg["bg_color"], cfg["bg_alpha"])
-            outline_col = back  # BorderStyle 3: outline colour IS the box
-            outline_val = pad   # ...and Outline is the box padding
+        has_bg = cfg["bg"] in ("pill", "box")
+        if has_bg:
+            outline_col = _ass_colour(cfg["ol_color"])
+            outline_val = 0
         else:
-            border_style = 1
-            back = "&H9E000000&"
             outline_col = _ass_colour(cfg["ol_color"])
             outline_val = max(0, round(cfg["ol"] * play_w / 1080)) or 2
         style_lines.append(
             f"Style: {name},{cfg['font']},{fontsize},{primary},{primary},"
-            f"{outline_col},{back},{-1 if cfg['weight'] >= 600 else 0},0,0,0,100,100,0,0,"
-            f"{border_style},{outline_val},0,5,0,0,0,1"
+            f"{outline_col},&H9E000000&,{-1 if cfg['weight'] >= 600 else 0},0,0,0,100,100,0,0,"
+            f"1,{outline_val},0,5,0,0,0,1"
         )
         start = max(0.0, float(ov["start_s"]))
         end = min(float(ov["end_s"]), clip_dur) if clip_dur else float(ov["end_s"])
@@ -212,17 +315,26 @@ def build_overlay_ass(
         xp, vp, wfrac = placement(ov, styles, ratio)
         x = round(xp * play_w)
         y = round(vp * play_h)
-        # Wrap width: libass wraps inside PlayResX minus the margins, so
-        # the box width becomes symmetric margins; \q0 turns smart
-        # wrapping on for the event (the script default stays manual).
-        margin = max(0, round((1 - wfrac) * play_w / 2))
-        text = _escape(_wrap(str(ov["text"]), cfg["wpl"]))
-        if cfg["caps"]:
-            text = text.upper()
-        text = text.replace("\n", "\\N")
+        raw = str(ov["text"]).upper() if cfg["caps"] else str(ov["text"])
+        max_w = max(40.0, wfrac * play_w - 2 * pad)
+        lines, block_w, line_h = _layout_lines(
+            raw, cfg["font"], cfg["weight"], fontsize, max_w, cfg["wpl"])
+        text = _escape("\n".join(lines)).replace("\n", "\\N")
+        if has_bg:
+            box_w = block_w + 2 * pad
+            box_h = len(lines) * line_h + 2 * pad
+            r = cfg["radius"] * play_w / 1080
+            back = _ass_colour(cfg["bg_color"], cfg["bg_alpha"])
+            a = round((1 - max(0.0, min(1.0, cfg["bg_alpha"]))) * 255)
+            events.append(
+                f"Dialogue: 1,{_ts(start)},{_ts(end)},{name},,0,0,0,,"
+                f"{{\\an5\\pos({x},{y})\\bord0\\shad0"
+                f"\\1c{back[2:-1] and back or back}\\1a&H{a:02X}&\\p1}}"
+                f"{_rounded_rect_path(box_w, box_h, r)}{{\\p0}}"
+            )
         events.append(
-            f"Dialogue: 1,{_ts(start)},{_ts(end)},{name},,{margin},{margin},0,,"
-            f"{{\\an5\\q0\\pos({x},{y})}}{text}"
+            f"Dialogue: 2,{_ts(start)},{_ts(end)},{name},,0,0,0,,"
+            f"{{\\an5\\q2\\pos({x},{y})}}{text}"
         )
 
     return "\n".join([
@@ -274,7 +386,7 @@ def subtitle_shift_for(
         if ov_cfg["bg"] == "none" or ov_cfg["bg_alpha"] <= 0:
             continue
         xp, vp, w = placement(ov, styles, ratio)
-        band = overlay_band(vp)
+        band = overlay_band(vp, drawn_box_height_frac(ov, styles, ratio))
         xspan = (xp - w / 2, xp + w / 2)
         if (band[0] < sub_band[1] and band[1] > sub_band[0]
                 and xspan[0] < sub_x[1] and xspan[1] > sub_x[0]):

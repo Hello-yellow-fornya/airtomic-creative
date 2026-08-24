@@ -34,6 +34,7 @@ export type Sv = {
   bg_alpha: number; caps: boolean; weight: number;
   ol_color?: string;
   font?: string;
+  radius?: number;
 };
 
 const RATIO_KEYS = ["9x16", "4x5", "1x1", "1.91x1"];
@@ -77,6 +78,7 @@ export function sanitizeSv(raw: unknown): Sv | null {
     ol_color: HEX.test(String(r.ol_color)) ? String(r.ol_color).toUpperCase() : "#000000",
     font: (FONTS as readonly string[]).includes(String(r.font))
       ? String(r.font) : "Plus Jakarta Sans",
+    radius: clamp(Number(r.radius ?? 8) || 0, 0, 40),
     bg_alpha: clamp(Number(r.bg_alpha ?? 0.75), 0, 1),
     caps: !!r.caps,
     weight: clamp(Math.round(Number(r.weight) || 800), 400, 900),
@@ -94,6 +96,7 @@ export function svFromPreset(
     vp: POSITION_VP[position] ?? 50,
     xp: 50,
     w: 80,
+    radius: Number(config.radius ?? 8),
     wpl: null,
     color: String(config.color ?? "#FFFFFF"),
     bg: config.box ? "pill" : "none",

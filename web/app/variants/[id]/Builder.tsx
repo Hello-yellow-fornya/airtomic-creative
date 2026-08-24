@@ -54,6 +54,7 @@ export type OvSv = {
   bg_alpha: number; caps: boolean; weight: number;
   ol_color?: string;
   font?: string;
+  radius?: number;
 };
 const FONTS = [
   "Plus Jakarta Sans", "Inter", "Montserrat", "Poppins",
@@ -94,13 +95,18 @@ function subVpWithOverlays(
   hasBg: (o: Ov) => boolean,
 ): number {
   const safe = SAFE[ratio] ?? { t: 8, b: 8, r: 0 };
+  const [playW, playH] = RATIO_SIZES[ratio] ?? [1080, 1920];
   const cap = 1 - safe.b / 100 + 0.04;
   let lowest: number | null = null;
   for (const o of ovs) {
     if (o.end <= t0 || o.start >= t1) continue;
     if (!hasBg(o)) continue;
     const pl = ovPlace(o, ratio);
-    const band: [number, number] = [pl.vp - 0.05, pl.vp + 0.05];
+    // approximate the drawn box: wrapped line count x line height + padding
+    const fs = (o.sv?.fs ?? 40) * (playW / 1080);
+    const nLines = wrapWpl(o.text, o.sv?.wpl ?? null).split("\n").length;
+    const hFrac = Math.max(0.05, (nLines * fs * 1.25 + 28 * (playW / 1080)) / playH);
+    const band: [number, number] = [pl.vp - hFrac / 2, pl.vp + hFrac / 2];
     const xspan: [number, number] = [pl.xp - pl.w / 2, pl.xp + pl.w / 2];
     if (band[0] < subVp + 0.05 && band[1] > subVp - 0.05
         && xspan[0] < 0.92 && xspan[1] > 0.08)
@@ -330,10 +336,11 @@ export default function Builder({
     const c = styleCfg(o.style) as {
       fs?: number; weight?: number; color?: string; box?: boolean;
       box_color?: string; box_alpha?: number; uppercase?: boolean;
+      radius?: number;
     };
     return {
       fs: c.fs ?? 40, ol: 0, vp: ovY(o.position, bRatio) * 100, wpl: null,
-      xp: 50, w: 80,
+      xp: 50, w: 80, radius: c.radius ?? 8,
       color: c.color ?? "#FFFFFF", bg: c.box ? "pill" : "none",
       bg_color: c.box_color ?? "#0A0B0D", bg_alpha: c.box_alpha ?? 0.75,
       caps: !!c.uppercase, weight: c.weight ?? 800,
@@ -481,13 +488,13 @@ export default function Builder({
     const c = styleCfg(key) as {
       fs?: number; weight?: number; color?: string; box?: boolean;
       box_color?: string; box_alpha?: number; uppercase?: boolean;
-      default_position?: string;
+      default_position?: string; radius?: number;
     };
     const pos = c.default_position ?? o.position;
     const sv: OvSv = {
       fs: c.fs ?? 40, ol: 0,
       vp: pos === "top" ? 20 : pos === "center" ? 50 : 76,
-      xp: 50, w: 80, pr: {},
+      xp: 50, w: 80, pr: {}, radius: c.radius ?? 8,
       wpl: null,
       color: c.color ?? "#FFFFFF", bg: c.box ? "pill" : "none",
       bg_color: c.box_color ?? "#0A0B0D", bg_alpha: c.box_alpha ?? 0.75,
@@ -1399,7 +1406,7 @@ export default function Builder({
                     ...(cfg.bg !== "none" ? {
                       background: `${cfg.bg_color}${Math.round(cfg.bg_alpha * 255).toString(16).padStart(2, "0")}`,
                       padding: "3px 8px",
-                      borderRadius: cfg.bg === "pill" ? 999 : 5,
+                      borderRadius: (cfg.radius ?? 8) * 0.4,
                     } : {}),
                   }}>
                     {wrapWpl(cfg.caps ? o.text.toUpperCase() : o.text, cfg.wpl)}
@@ -1524,7 +1531,7 @@ export default function Builder({
                     ...(cfg.bg !== "none" ? {
                       background: `${cfg.bg_color}${Math.round(cfg.bg_alpha * 255).toString(16).padStart(2, "0")}`,
                       padding: "4px 10px",
-                      borderRadius: cfg.bg === "pill" ? 999 : 6,
+                      borderRadius: (cfg.radius ?? 8) * 0.48,
                     } : {}),
                   }}>
                     {text}
@@ -1900,6 +1907,13 @@ export default function Builder({
                   </button>
                 </div>
                 <div className="ctrl">
+                  <label htmlFor="ovfont">Font</label>
+                  <select id="ovfont" value={tv.font ?? "Plus Jakarta Sans"}
+                    onChange={(e) => patchSv(targetOv, { font: e.target.value })}>
+                    {FONTS.map((f) => <option key={f} value={f}>{f}</option>)}
+                  </select>
+                </div>
+                <div className="ctrl">
                   <label>Position quick-set ({RATIOS[bRatio].label})</label>
                   <select value=""
                     onChange={(e) => {
@@ -1989,6 +2003,13 @@ export default function Builder({
                         value={Math.round(tv.bg_alpha * 100)}
                         title="Background only — the text keeps full opacity"
                         onChange={(e) => patchSv(targetOv, { bg_alpha: +e.target.value / 100 })} />
+                    </div>
+                    <div className="ctrl">
+                      <label htmlFor="ovrad">Radius <b>{Math.round(tv.radius ?? 8)}px</b></label>
+                      <input id="ovrad" type="range" min={0} max={40}
+                        value={Math.round(tv.radius ?? 8)}
+                        title="Background corner radius at 1080 output width"
+                        onChange={(e) => patchSv(targetOv, { radius: +e.target.value })} />
                     </div>
                   </>
                 )}
