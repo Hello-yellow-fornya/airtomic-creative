@@ -31,7 +31,7 @@ def claim_job(conn: psycopg.Connection, worker_id: str) -> dict[str, Any] | None
         WHERE id = (
             SELECT id FROM jobs
             WHERE status = 'queued' AND run_at <= now()
-            ORDER BY run_at, id
+            ORDER BY priority, run_at, id
             LIMIT 1
             FOR UPDATE SKIP LOCKED
         )
@@ -89,6 +89,7 @@ def create_video_and_ingest_job(
     uploaded_by: str | None,
     video_id: str | None = None,
     meta_video_id: str | None = None,
+    priority: int = 0,
 ) -> tuple[str, int]:
     """storage_uri may be r2:// (already uploaded) or http(s):// — the ingest
     handler fetches URL sources into R2 itself. meta_video_id links an
@@ -109,16 +110,20 @@ def create_video_and_ingest_job(
                    VALUES (%s, %s) ON CONFLICT (meta_video_id) DO NOTHING""",
                 (meta_video_id, row["id"]),
             )
-        job_id = enqueue_job(conn, "ingest", {"video_id": str(row["id"])})
+        job_id = enqueue_job(conn, "ingest", {"video_id": str(row["id"])},
+                             priority=priority)
     return str(row["id"]), job_id
 
 
 def enqueue_job(
-    conn: psycopg.Connection, job_type: str, payload: dict[str, Any]
+    conn: psycopg.Connection, job_type: str, payload: dict[str, Any],
+    priority: int = 0,
 ) -> int:
+    """priority: 0 = interactive (user uploads, renders); 10 = backfill
+    bulk work — user jobs always claim first."""
     row = conn.execute(
-        "INSERT INTO jobs (type, payload) VALUES (%s, %s) RETURNING id",
-        (job_type, json.dumps(payload)),
+        "INSERT INTO jobs (type, payload, priority) VALUES (%s, %s, %s) RETURNING id",
+        (job_type, json.dumps(payload), priority),
     ).fetchone()
     return row["id"]
 

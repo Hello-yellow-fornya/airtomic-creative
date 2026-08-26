@@ -458,6 +458,7 @@ def run(apply: bool, since: str | None, until: str | None,
                 title=title or f"meta ad video {mvid}",
                 source="ad_creative", uploaded_by="backfill",
                 meta_video_id=mvid,
+                priority=10,  # bulk work — user uploads claim first
             )
             queued += 1
             log.info("queued %s as video %s (job %s)", mvid, vid, job_id)

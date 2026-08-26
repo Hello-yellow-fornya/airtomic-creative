@@ -96,13 +96,25 @@ def _loop(slot: int, cfg) -> None:
                 _stop.wait(cfg.poll_interval_s)
         except Exception:
             # Connection-level failures land here; back off and reconnect.
+            # The reconnect itself must retry forever: during the Neon
+            # quota outage a bare reconnect raised, escaped this handler,
+            # and killed every loop thread while the daemonised webapp
+            # kept the zombie process alive — jobs sat queued for a day.
             log.error("worker loop error:\n%s", traceback.format_exc())
             try:
                 conn.close()
             except Exception:
                 pass
-            _stop.wait(5)
-            conn = db.connect(cfg.database_url)
+            backoff = 5.0
+            while not _stop.is_set():
+                _stop.wait(backoff)
+                try:
+                    conn = db.connect(cfg.database_url)
+                    log.info("db reconnected")
+                    break
+                except Exception as exc:
+                    log.error("reconnect failed (%s) — retrying in %ss", exc, backoff)
+                    backoff = min(backoff * 2, 60.0)
 
 
 def main() -> None:
@@ -142,6 +154,12 @@ def main() -> None:
 
     while not _stop.is_set():
         _stop.wait(1)
+        # If every loop thread has died anyway, exit non-zero so the
+        # platform restarts the whole process — never idle as a zombie
+        # web server with a dead queue.
+        if not any(t.is_alive() for t in threads):
+            log.critical("all worker loops dead — exiting for restart")
+            sys.exit(1)
     log.info("shutting down")
     if server is not None:
         server.shutdown()
