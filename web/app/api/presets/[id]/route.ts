@@ -3,7 +3,7 @@ import { q } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
-const KEYS = ["fs", "ol", "vp", "wpl", "hl", "caps", "box", "font"];
+const KEYS = ["fs", "ol", "vp", "wpl", "hl", "caps", "box", "font", "weight", "bg", "bg_color", "bg_alpha", "ol_color"];
 
 /** Update a subtitle preset's config. Only known keys are merged — the
  * renderer reads this verbatim, so no free-form fields. */

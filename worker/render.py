@@ -363,11 +363,21 @@ def _build_command(
         layout = s["layout"]
 
         if layout == "card":
-            ai = _asset_input(s, assets, input_index, "card")
-            filters.append(
-                f"[{ai}:v]{_cover_chain(target_w, target_h)},"
-                f"trim=0:{dur:.3f},setpts=PTS-STARTPTS[v{i}]"
-            )
+            aid = str(s["slot_a_asset"] or s["slot_b_asset"] or "")
+            if aid in assets:
+                ai = _asset_input(s, assets, input_index, "card")
+                filters.append(
+                    f"[{ai}:v]{_cover_chain(target_w, target_h)},"
+                    f"trim=0:{dur:.3f},setpts=PTS-STARTPTS[v{i}]"
+                )
+            else:
+                # no brand asset yet: the brand-dark card, so an end card
+                # is usable before any assets are uploaded
+                filters.append(
+                    f"color=c=0x14171C:size={target_w}x{target_h}:rate={FPS},"
+                    f"trim=0:{dur:.3f},setpts=PTS-STARTPTS,"
+                    f"setsar=1,format=yuv420p[v{i}]"
+                )
             filters.append(_silence(dur, f"a{i}"))  # assets are muted
         else:
             s_in, s_out = float(s["source_in_s"]), float(s["source_out_s"])

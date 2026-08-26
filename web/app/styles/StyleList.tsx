@@ -5,8 +5,11 @@ import { useRouter } from "next/navigation";
 
 type Config = {
   fs: number; ol: number; vp: number; wpl: number; hl: string;
-  caps: boolean; box: boolean; font: string;
+  caps: boolean; box: boolean; font: string; weight?: number;
 };
+const WEIGHTS: [number, string][] = [
+  [300, "Light"], [400, "Regular"], [500, "Medium"], [700, "Bold"],
+];
 type Preset = { id: string; name: string; isDefault: boolean; config: Config };
 
 const SAMPLE = ["Your", "barrier", "isn't", "broken"];
@@ -35,7 +38,7 @@ export default function StyleList({ presets }: { presets: Preset[] }) {
   }
 
   const summary = (c: Config) =>
-    [`${c.font} 700`, `${c.fs}px`, c.caps ? "caps" : null,
+    [`${c.font} ${c.weight ?? 700}`, `${c.fs}px`, c.caps ? "caps" : null,
      `outline ${c.ol}`, c.box ? "box" : null,
      c.hl === "#FFFFFF" ? "no highlight" : `highlight ${c.hl}`]
       .filter(Boolean).join(" · ");
@@ -74,6 +77,18 @@ export default function StyleList({ presets }: { presets: Preset[] }) {
             {editing === p.id && draft && (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 200px", gap: 18, marginTop: 12 }}>
                 <div>
+                  <div className="ctrl">
+                    <label>Weight</label>
+                    <div className="presets" style={{ margin: 0 }}>
+                      {WEIGHTS.map(([w, lbl]) => (
+                        <button key={w} className="chip"
+                          data-on={(draft.weight ?? 700) === w ? "1" : undefined}
+                          onClick={() => setDraft({ ...draft, weight: w })}>
+                          {lbl}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <div className="ctrl">
                     <label>Size <b>{draft.fs}px</b></label>
                     <input type="range" min={16} max={46} value={draft.fs}
@@ -127,7 +142,8 @@ export default function StyleList({ presets }: { presets: Preset[] }) {
                     position: "absolute", left: "6%", right: "6%",
                     top: `${draft.vp}%`, transform: "translateY(-50%)",
                     textAlign: "center",
-                    fontFamily: "var(--font-inter),sans-serif", fontWeight: 700,
+                    fontFamily: `'${draft.font}',sans-serif`,
+                    fontWeight: draft.weight ?? 700,
                     fontSize: draft.fs * 0.45, lineHeight: 1.22, color: "#fff",
                     textShadow: draft.ol ? `0 0 ${draft.ol}px #000,0 0 ${draft.ol}px #000` : "none",
                     ...(draft.box ? { background: "rgba(0,0,0,.62)", padding: "3px 7px", borderRadius: 3 } : {}),

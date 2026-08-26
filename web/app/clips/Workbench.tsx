@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Builder, { type ComparePayload, type OvSv } from "../variants/[id]/Builder";
+import { exportFilename } from "@/lib/adname";
 
 type GroupScene = {
   id: string; idx: number; layout: string; in: number | null;
@@ -571,6 +572,9 @@ export default function Workbench({ initialVariantId, workerUp }: {
                     data-on={isLoaded && i === selScene ? "1" : "0"}
                     onClick={(e) => {
                       if ((e.target as Element).closest(".op")) return;
+                      // don't bubble into the row handler — it re-selects
+                      // the variant with sceneIdx 0, undoing this click
+                      e.stopPropagation();
                       void select(r.id, i);
                     }}
                     onDragStart={(e) => {
@@ -703,8 +707,8 @@ export default function Workbench({ initialVariantId, workerUp }: {
                       <span className="mi"><i /><i /></span>Speakers split
                       {!payload?.assets.length && <span className="sub">needs a brand asset</span>}
                     </button>
-                    <button disabled={!payload?.assets.length}
-                      title={!payload?.assets.length ? "needs a brand asset — the assets library is empty" : undefined}
+                    <button
+                      title="Adds an end card — uses your end-card asset when one exists, else the brand-dark card"
                       onClick={() => {
                       setMenuFor(null);
                       void call(`/api/variants/${r.id}/scenes`, "POST", {
@@ -713,7 +717,6 @@ export default function Workbench({ initialVariantId, workerUp }: {
                       });
                     }}>
                       <span className="mi"><i className="crd" /></span>End card
-                      {!payload?.assets.length && <span className="sub">needs a brand asset</span>}
                     </button>
                     <div className="sep" />
                     <div className="grp">Apply template</div>
@@ -781,7 +784,7 @@ export default function Workbench({ initialVariantId, workerUp }: {
             {opt("full", "Full frame", <i />, false)}
             {opt("split_product", "Product split", <><i /><i className="ast" /></>, true)}
             {opt("split_speakers", "Speakers split", <><i /><i /></>, true)}
-            {opt("card", "End card", <i className="crd" />, true)}
+            {opt("card", "End card", <i className="crd" />, false)}
           </div>
         );
       })()}
@@ -790,7 +793,7 @@ export default function Workbench({ initialVariantId, workerUp }: {
         title="Renders every ratio in each variant's export set — stale variants first. Finished files appear on the Preview screen."
         onClick={() => void exportAll()}>
         {busy && exportRun === null ? "Queuing…"
-          : `Export ${nChecked ? `${nChecked} checked` : "all variants"} — every ratio in the export set`}
+          : `Export MP4s ${nChecked ? `(${nChecked} checked)` : "(all variants)"} — renders every ratio in the export set`}
       </button>
       {exportRun && (
         <div className="vexp-prog">
@@ -802,9 +805,21 @@ export default function Workbench({ initialVariantId, workerUp }: {
                 <span className="vexp-nm" title={g.name}>{g.label} · {g.name}</span>
                 {exportRun.jobs.filter((j) => j.variantId === vid).map(({ ratio }) => {
                   const st = g.ratioStatus.find((x) => x.ratio === ratio)?.status ?? "queued";
+                  if (st === "done") {
+                    const file = exportFilename(
+                      { videoSource: payload?.variant.videoSource ?? "longform",
+                        name: g.name, label: g.label }, ratio, "mp4");
+                    return (
+                      <a key={ratio} className="exchip"
+                        href={`/api/exports/${vid}/${ratio}.mp4?dl=${encodeURIComponent(file)}`}
+                        title={`Download ${file}`}>
+                        ↓ {ratio.replace("x", ":")} MP4
+                      </a>
+                    );
+                  }
                   return (
                     <span key={ratio}
-                      className={`tag${st === "done" ? " ok" : st === "failed" ? " flag" : ""}`}>
+                      className={`tag${st === "failed" ? " flag" : ""}`}>
                       {ratio.replace("x", ":")} {st}
                     </span>
                   );

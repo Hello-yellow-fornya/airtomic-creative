@@ -74,6 +74,9 @@ DEFAULT_PRESET = {
     # "bg" supersedes the legacy box boolean: none | pill | box.
     "color": "#FFFFFF", "bg": None, "bg_color": "#000000", "bg_alpha": 0.62,
     "ol_color": "#000000",
+    # weight: light 300 / regular 400 / medium 500 / bold 700 — presets
+    # were previously hard-bolded in the style line
+    "weight": 700,
 }
 
 
@@ -143,9 +146,11 @@ def build_ass(
             )
 
     ol_col = _ass_colour(str(cfg.get("ol_color") or "#000000"))
+    from .overlays import ass_family
+    fam, bold = ass_family(str(cfg.get("font") or "Inter"), int(cfg.get("weight", 700)))
     style = (
-        f"Style: Caption,{cfg['font']},{fontsize},{base},{base},"
-        f"{ol_col},{back},-1,0,0,0,100,100,0,0,"
+        f"Style: Caption,{fam},{fontsize},{base},{base},"
+        f"{ol_col},{back},{bold},0,0,0,100,100,0,0,"
         f"{border_style},{outline_val},0,5,0,0,0,1"
     )
 

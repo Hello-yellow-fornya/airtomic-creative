@@ -184,33 +184,62 @@ def _ts(seconds: float) -> str:
     return f"{h}:{m:02d}:{s:05.2f}"
 
 
-_FONT_FILES = {
-    "Plus Jakarta Sans": ["PlusJakartaSans-Variable.ttf"],
-    "Inter": ["Inter-Variable.ttf"],
-    "Montserrat": ["Montserrat-Variable.ttf"],
-    "Poppins": ["Poppins-Regular.ttf", "Poppins-Bold.ttf", "Poppins-ExtraBold.ttf"],
-    "Bebas Neue": ["BebasNeue-Regular.ttf"],
-    "Playfair Display": ["PlayfairDisplay-Variable.ttf"],
-    "Space Grotesk": ["SpaceGrotesk-Variable.ttf"],
+# Static instances per family per weight tier — every offered weight is
+# a real fc-visible face, so the burn is deterministic (variable-font
+# named-instance matching is not reliable through fontconfig).
+_FONT_FILES: dict[str, dict[int, str]] = {
+    "Plus Jakarta Sans": {300: "PlusJakartaSans-Light.ttf", 400: "PlusJakartaSans-Regular.ttf",
+                          500: "PlusJakartaSans-Medium.ttf", 700: "PlusJakartaSans-Bold.ttf",
+                          800: "PlusJakartaSans-ExtraBold.ttf"},
+    "Inter": {300: "Inter-Light.ttf", 400: "Inter-Regular.ttf", 500: "Inter-Medium.ttf",
+              700: "Inter-Bold.ttf", 800: "Inter-ExtraBold.ttf"},
+    "Montserrat": {300: "Montserrat-Light.ttf", 400: "Montserrat-Regular.ttf",
+                   500: "Montserrat-Medium.ttf", 700: "Montserrat-Bold.ttf",
+                   800: "Montserrat-ExtraBold.ttf"},
+    "Poppins": {300: "Poppins-Light.ttf", 400: "Poppins-Regular.ttf", 500: "Poppins-Medium.ttf",
+                700: "Poppins-Bold.ttf", 800: "Poppins-ExtraBold.ttf"},
+    "Bebas Neue": {400: "BebasNeue-Regular.ttf"},
+    "Playfair Display": {400: "PlayfairDisplay-Regular.ttf", 500: "PlayfairDisplay-Medium.ttf",
+                         700: "PlayfairDisplay-Bold.ttf", 800: "PlayfairDisplay-ExtraBold.ttf"},
+    "Space Grotesk": {300: "SpaceGrotesk-Light.ttf", 400: "SpaceGrotesk-Regular.ttf",
+                      500: "SpaceGrotesk-Medium.ttf", 700: "SpaceGrotesk-Bold.ttf"},
 }
+
+WEIGHT_TIERS = (300, 400, 500, 700, 800)
+
+
+def weight_tier(weight: int) -> int:
+    """Snap an arbitrary weight to the nearest offered tier."""
+    return min(WEIGHT_TIERS, key=lambda t: abs(t - int(weight)))
+
+
+def _weight_file(family: str, weight: int) -> str:
+    files = _FONT_FILES.get(family) or _FONT_FILES["Plus Jakarta Sans"]
+    tier = weight_tier(weight)
+    if tier in files:
+        return files[tier]
+    return files[min(files, key=lambda t: abs(t - tier))]
+
+
+def ass_family(family: str, weight: int) -> tuple[str, int]:
+    """(Fontname, Bold flag) for one family+weight: Light/Medium select
+    their static face by family suffix; >=600 sets the Bold flag (700
+    picks Bold, 800 the family's boldest via fontconfig)."""
+    tier = weight_tier(weight)
+    files = _FONT_FILES.get(family) or {}
+    suffix = {300: " Light", 500: " Medium"}.get(tier, "")
+    if suffix and tier not in files:
+        suffix = ""  # family has no such face (e.g. Playfair Light)
+    return family + suffix, (-1 if tier >= 600 else 0)
 
 
 def _pil_font(family: str, weight: int, fs_px: int):
-    """Best-effort PIL font for measuring the text block the drawing
-    wraps. Variable fonts get the weight axis; Poppins picks the static
-    face. Padding absorbs the small remaining mismatch with libass."""
+    """PIL font for measuring the text block the drawing wraps — the
+    same static face libass resolves, so measurement matches the burn."""
     from pathlib import Path
     from PIL import ImageFont
-    files = _FONT_FILES.get(family) or _FONT_FILES["Plus Jakarta Sans"]
-    name = files[0]
-    if len(files) > 1:  # static faces: pick by weight
-        name = files[2] if weight >= 800 else files[1] if weight >= 600 else files[0]
-    f = ImageFont.truetype(str(Path(__file__).parent / "fonts" / name), fs_px)
-    try:
-        f.set_variation_by_axes([weight])
-    except Exception:
-        pass
-    return f
+    return ImageFont.truetype(
+        str(Path(__file__).parent / "fonts" / _weight_file(family, weight)), fs_px)
 
 
 def _layout_lines(text: str, family: str, weight: int, fs_px: int,
@@ -303,9 +332,10 @@ def build_overlay_ass(
         else:
             outline_col = _ass_colour(cfg["ol_color"])
             outline_val = max(0, round(cfg["ol"] * play_w / 1080)) or 2
+        fam, bold = ass_family(cfg["font"], cfg["weight"])
         style_lines.append(
-            f"Style: {name},{cfg['font']},{fontsize},{primary},{primary},"
-            f"{outline_col},&H9E000000&,{-1 if cfg['weight'] >= 600 else 0},0,0,0,100,100,0,0,"
+            f"Style: {name},{fam},{fontsize},{primary},{primary},"
+            f"{outline_col},&H9E000000&,{bold},0,0,0,100,100,0,0,"
             f"1,{outline_val},0,5,0,0,0,1"
         )
         start = max(0.0, float(ov["start_s"]))

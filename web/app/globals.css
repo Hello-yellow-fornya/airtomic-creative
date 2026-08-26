@@ -1160,3 +1160,12 @@ table.lib-list tbody tr:hover td{background:var(--paper)}
 .rfseg button{font-size:10px !important}
 .swatches.rf-fit{display:inline-flex;gap:3px;margin-left:2px}
 .swatches.rf-fit .sw{width:14px;height:14px}
+@font-face{font-family:'Poppins';src:url(/fonts/Poppins-Light.ttf) format('truetype');font-weight:300;font-display:swap}
+@font-face{font-family:'Poppins';src:url(/fonts/Poppins-Medium.ttf) format('truetype');font-weight:500;font-display:swap}
+
+/* End-card placeholder + player-bar downloads */
+.lay-card .card-ph{margin:auto;text-align:center;color:#B9BDC7;font-size:10px;
+  line-height:1.5;padding:14px;max-width:200px}
+.lay-card .card-ph b{display:block;color:#fff;font-size:11px;margin-bottom:3px}
+.lay-card .card-ph a{color:var(--signal);text-decoration:underline}
+.vbar-dl{display:inline-flex;gap:4px;align-items:center}

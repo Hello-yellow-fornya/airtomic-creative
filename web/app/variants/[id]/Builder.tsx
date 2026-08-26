@@ -15,6 +15,7 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import ColorPicker from "./ColorPicker";
+import { exportFilename } from "@/lib/adname";
 import {
   clampTransform, DEFAULT_TRANSFORM, framedHigh, RATIO_SIZES,
   type Reframe,
@@ -26,6 +27,7 @@ type VariantInfo = {
   presetId: string | null; overrides: Record<string, unknown>;
   videoId: string | null; videoTitle?: string | null;
   videoDuration: number; srcW: number; srcH: number;
+  videoSource?: string;
   transforms?: Record<string, Reframe>;
   staleRatios?: string[];
   renderStatus?: string | null; renderError?: string | null;
@@ -149,8 +151,11 @@ type Style = {
   fs: number; ol: number; vp: number; wpl: number; hl: string;
   caps: boolean; box: boolean;
   color: string; bg: "none" | "pill" | "box"; bgColor: string;
-  bgAlpha: number; olColor: string; font: string;
+  bgAlpha: number; olColor: string; font: string; weight: number;
 };
+const WEIGHT_OPTS: [number, string][] = [
+  [300, "Light"], [400, "Regular"], [500, "Medium"], [700, "Bold"],
+];
 
 // Brand palette for the Text style panel swatches.
 const TEXT_COLORS = ["#FFFFFF", "#0A0B0D", "#FFC629", "#4ED6A1", "#FF6B8A"];
@@ -262,6 +267,7 @@ export default function Builder({
       bgAlpha: Number(c.bg_alpha ?? 0.62),
       olColor: String(c.ol_color ?? "#000000"),
       font: FONTS.includes(String(c.font)) ? String(c.font) : "Plus Jakarta Sans",
+      weight: Number(c.weight ?? 700),
     };
   };
   const [S, setS] = useState<Style>(seedStyle);
@@ -1177,6 +1183,7 @@ export default function Builder({
       bgAlpha: Number(c.bg_alpha ?? 0.62),
       olColor: String(c.ol_color ?? "#000000"),
       font: FONTS.includes(String(c.font)) ? String(c.font) : "Plus Jakarta Sans",
+      weight: Number(c.weight ?? 700),
     });
     persistStyle({}, fixes, p.id);
   }
@@ -1251,6 +1258,24 @@ export default function Builder({
               : variant.renderStatus === "failed" ? "tag flag" : "tag"}
               title={variant.renderError ?? undefined}>
               {variant.renderStatus === "done" ? "rendered" : variant.renderStatus}
+            </span>
+          )}
+          {(variant.ratios?.length ?? 0) > 0 && (
+            <span className="vbar-dl" title="Finished renders — download the burned MP4 (SRT sidecar in the menu)">
+              {variant.ratios!.map((rt) => (
+                <a key={rt} className="exchip"
+                  href={`/api/exports/${variant.id}/${rt}.mp4?dl=${encodeURIComponent(
+                    exportFilename({ videoSource: variant.videoSource ?? "longform",
+                      name: variant.name, label: variant.label }, rt, "mp4"))}`}>
+                  ↓ {RATIOS[rt]?.label ?? rt}
+                </a>
+              ))}
+              <a className="exchip" title="Subtitle sidecar — same remapped words as the burn"
+                href={`/api/exports/${variant.id}/${variant.ratios![0]}.srt?dl=${encodeURIComponent(
+                  exportFilename({ videoSource: variant.videoSource ?? "longform",
+                    name: variant.name, label: variant.label }, variant.ratios![0], "srt"))}`}>
+                ↓ SRT
+              </a>
             </span>
           )}
           {(stale || staleR.includes(bRatio)) && (
@@ -1465,7 +1490,7 @@ export default function Builder({
               <div className="cap" role="button" tabIndex={0}
                 onClick={() => setTextTarget("subs")}
                 style={{
-                fontFamily: `'${S.font}',sans-serif`, fontWeight: 700,
+                fontFamily: `'${S.font}',sans-serif`, fontWeight: S.weight,
                 lineHeight: 1.22, fontSize: capFont, color: S.color,
                 letterSpacing: "-.01em", cursor: "pointer",
                 outline: textTarget === "subs" ? "1px dashed rgba(255,255,255,.45)" : "none",
@@ -1580,7 +1605,18 @@ export default function Builder({
               <div
                 className={`lay-card${scene.asset && workerUp ? " has-img" : ""}`}
                 style={{ display: "flex", ...assetBg(scene.asset) }}
-              />
+              >
+                {!scene.asset && (
+                  <div className="card-ph">
+                    <b>End card</b>
+                    <span>
+                      No brand asset selected — it renders as this dark card.
+                      Pick one in the Scene panel, or upload stills under{" "}
+                      <a href="/assets">Setup → Brand assets</a>.
+                    </span>
+                  </div>
+                )}
+              </div>
             )}
 
             {/* reframe layer: drag pans, wheel/pinch scales around the
@@ -1739,9 +1775,9 @@ export default function Builder({
             </div>
           ) : (
             <p style={{ fontSize: 11, color: "var(--muted)" }}>
-              No brand assets yet. Upload stills to R2 via the Cloudflare
-              dashboard and add rows to <span className="mono">assets</span> —
-              they appear here and in splits.
+              No brand assets yet — upload product stills and end cards under{" "}
+              <a href="/assets">Setup → Brand assets</a>. They appear here,
+              in splits, and on end cards.
             </p>
           )}
           {assets.length > 0 && (
@@ -1914,6 +1950,18 @@ export default function Builder({
                   </select>
                 </div>
                 <div className="ctrl">
+                  <label>Weight</label>
+                  <div className="presets" style={{ margin: 0 }}>
+                    {WEIGHT_OPTS.map(([w, lbl]) => (
+                      <button key={w} className="chip"
+                        data-on={(tv.weight >= 600 ? 700 : tv.weight) === w ? "1" : undefined}
+                        onClick={() => patchSv(targetOv, { weight: w })}>
+                        {lbl}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="ctrl">
                   <label>Position quick-set ({RATIOS[bRatio].label})</label>
                   <select value=""
                     onChange={(e) => {
@@ -2040,6 +2088,18 @@ export default function Builder({
                   onChange={(e) => setStyle({ font: e.target.value })}>
                   {FONTS.map((f) => <option key={f} value={f}>{f}</option>)}
                 </select>
+              </div>
+              <div className="ctrl">
+                <label>Weight</label>
+                <div className="presets" style={{ margin: 0 }}>
+                  {WEIGHT_OPTS.map(([w, lbl]) => (
+                    <button key={w} className="chip"
+                      data-on={S.weight === w ? "1" : undefined}
+                      onClick={() => setStyle({ weight: w })}>
+                      {lbl}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="ctrl">
                 <label htmlFor="fs">Size <b>{S.fs}px</b></label>

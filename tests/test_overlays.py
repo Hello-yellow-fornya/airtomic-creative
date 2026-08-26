@@ -200,3 +200,24 @@ def test_font_family_burns_and_is_vendored():
     stems = " ".join(p.name for p in Path("worker/fonts").glob("*.ttf")).replace(" ", "")
     for fam in FONTS:
         assert fam.replace(" ", "") in stems, fam
+
+
+def test_weight_maps_to_static_face_and_bold_flag():
+    from worker.overlays import ass_family
+    assert ass_family("Inter", 300) == ("Inter Light", 0)
+    assert ass_family("Inter", 400) == ("Inter", 0)
+    assert ass_family("Inter", 500) == ("Inter Medium", 0)
+    assert ass_family("Inter", 700) == ("Inter", -1)
+    assert ass_family("Inter", 800) == ("Inter", -1)
+    # families without a face fall back to the base family
+    assert ass_family("Playfair Display", 300) == ("Playfair Display", 0)
+    assert ass_family("Bebas Neue", 500) == ("Bebas Neue", 0)
+
+
+def test_subtitle_weight_reaches_the_style_line():
+    from worker.subtitles import build_ass
+    words = [{"word": "hi", "start": 0.0, "end": 0.5}]
+    light = build_ass(words, {"font": "Inter", "weight": 300}, 1080, 1920)
+    bold = build_ass(words, {"font": "Inter"}, 1080, 1920)  # default stays bold
+    assert "Style: Caption,Inter Light," in light and ",0,0,0,0,100" in light
+    assert "Style: Caption,Inter," in bold and ",-1,0,0,0,100" in bold

@@ -81,7 +81,7 @@ export function sanitizeSv(raw: unknown): Sv | null {
     radius: clamp(Number(r.radius ?? 8) || 0, 0, 40),
     bg_alpha: clamp(Number(r.bg_alpha ?? 0.75), 0, 1),
     caps: !!r.caps,
-    weight: clamp(Math.round(Number(r.weight) || 800), 400, 900),
+    weight: clamp(Math.round(Number(r.weight) || 800), 300, 900),
   };
 }
 
