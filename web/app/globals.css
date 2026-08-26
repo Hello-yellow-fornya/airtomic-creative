@@ -351,7 +351,12 @@ select,input[type=text]{
 .strip{
   position:relative;height:52px;margin-top:14px;border-radius:var(--radius);
   overflow:hidden;background:var(--ink);touch-action:none;user-select:none;
+  padding:0 15px;
 }
+/* the rail holds every %-positioned child; the strip's 15px padding gives
+   the trim handles somewhere to live when the window reaches an end of
+   the footage, instead of being clipped off the edge */
+.strip-rail{position:relative;height:100%}
 .frames{position:absolute;inset:0;display:flex}
 .frames i{flex:1;border-right:1px solid rgba(0,0,0,.35);background-size:cover;background-position:center}
 .mask{position:absolute;top:0;bottom:0;background:rgba(10,10,12,.68);pointer-events:none}
@@ -368,7 +373,7 @@ select,input[type=text]{
 .hnd.r{right:-15px;border-radius:0 3px 3px 0}
 .strip-ph{position:absolute;top:0;bottom:0;width:2px;background:#fff;pointer-events:none;
   box-shadow:0 0 4px rgba(0,0,0,.5)}
-.strip-scale{display:flex;justify-content:space-between;margin-top:4px}
+.strip-scale{display:flex;justify-content:space-between;margin:4px 15px 0}
 .strip-scale span{font-family:var(--font-mono),monospace;font-size:9.5px;color:var(--faint)}
 
 .cap{position:absolute;left:6%;right:6%;text-align:center;pointer-events:none;z-index:3}

@@ -1655,11 +1655,12 @@ export default function Builder({
         </div>
 
         {/* filmstrip trim */}
-        <div className="strip" ref={stripRef}
+        <div className="strip"
           onPointerDown={(e) => {
             if ((e.target as Element).closest(".hnd")) return;
             seek(timeAt(e.clientX) - IN);
           }}>
+          <div className="strip-rail" ref={stripRef}>
           <div className="frames">
             {Array.from({ length: 16 }, (_, i) => {
               const l = 26 + Math.sin(i * 1.7) * 7;
@@ -1693,6 +1694,7 @@ export default function Builder({
             );
           })}
           <div className="strip-ph" style={{ left: `${((IN + Math.min(t, clipDur) - a0) / span) * 100}%` }} />
+          </div>
         </div>
         <div className="strip-scale">
           <span>{mmss(a0)}</span><span>{mmss(a1)}</span>
