@@ -74,3 +74,13 @@ export function framedHigh(
     { x: win.x, y: 0, w: win.w, h: win.h }, srcW, srcH, frameW, frameH);
   return { ...DEFAULT_TRANSFORM, ...t };
 }
+
+export function framedLow(
+  srcW: number, srcH: number, frameW: number, frameH: number,
+): Reframe {
+  const win = transformToWindow(DEFAULT_TRANSFORM, srcW, srcH, frameW, frameH);
+  if (win.h >= 0.999) return { ...DEFAULT_TRANSFORM };
+  const t = windowToTransform(
+    { x: win.x, y: 1 - win.h, w: win.w, h: win.h }, srcW, srcH, frameW, frameH);
+  return { ...DEFAULT_TRANSFORM, ...t };
+}

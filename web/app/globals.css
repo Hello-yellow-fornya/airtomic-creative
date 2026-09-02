@@ -1174,3 +1174,51 @@ table.lib-list tbody tr:hover td{background:var(--paper)}
 .lay-card .card-ph b{display:block;color:#fff;font-size:11px;margin-bottom:3px}
 .lay-card .card-ph a{color:var(--signal);text-decoration:underline}
 .vbar-dl{display:inline-flex;gap:4px;align-items:center}
+
+/* Builder chrome, four bands */
+.vbar-meta{font-size:10.5px;color:var(--faint)}
+.build-wrap{display:flex;flex-direction:column;gap:0}
+.build-actions{display:flex;align-items:center;gap:11px;margin-top:12px;padding:12px 14px;
+  border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);flex-wrap:wrap}
+.build-actions .warnrow{font-size:11.5px;color:#7A5A00;display:flex;align-items:center;gap:7px}
+.build-actions .dotw{width:8px;height:8px;border-radius:50%;background:var(--signal);flex:none}
+.build-actions .dotw.bad{background:#C4436E}
+.btn-signal{background:var(--signal);border:1px solid var(--signal);color:var(--ink);
+  font-weight:600;font-size:12.5px;padding:8px 18px;border-radius:var(--radius);cursor:pointer}
+.btn-signal:hover{filter:brightness(.96)}
+.btn-signal:disabled{opacity:.5;cursor:default}
+
+/* export ratio cards */
+.ratios{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:0 0 10px}
+.rt{display:inline-flex;align-items:stretch;border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--surface);overflow:hidden}
+.rt:hover{border-color:var(--muted)}
+.rt[data-view="1"]{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
+.rt .rt-cb{display:flex;align-items:center;padding:0 0 0 8px;border:0;background:none;cursor:pointer}
+.rt .cb{width:14px;height:14px;border:1.5px solid var(--line);border-radius:2px;background:var(--surface);
+  display:flex;align-items:center;justify-content:center}
+.rt[data-sel="1"] .cb{background:var(--ink);border-color:var(--ink)}
+.rt[data-sel="1"] .cb::after{content:"";width:7px;height:4px;border-left:2px solid #fff;
+  border-bottom:2px solid #fff;transform:rotate(-45deg) translate(1px,-1px)}
+.rt .rt-lbl{display:flex;align-items:baseline;gap:7px;padding:6px 10px 6px 7px;border:0;background:none;cursor:pointer}
+.rt .lbl{font-size:11.5px;font-weight:500}
+.rt .st{font-size:9.5px;color:var(--faint)}
+.rt .st.warn{color:var(--deep, #7A5A00)}
+.rt .st.ok{color:#0E5F5C}
+.ratio-help{font-size:10.5px;color:var(--muted)}
+
+/* framing band under the player */
+.frametools{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:10px;
+  padding:7px 10px;background:var(--paper);border:1px solid var(--line-2, var(--line));border-radius:var(--radius)}
+
+/* roomier layout tiles */
+.layouts{display:grid;grid-template-columns:repeat(2,1fr);gap:7px;margin-bottom:10px}
+.layouts .ly{border:1px solid var(--line);border-radius:var(--radius);padding:9px 6px;background:var(--surface);
+  display:flex;flex-direction:column;align-items:center;gap:7px;font-size:10.5px;color:var(--muted);cursor:pointer}
+.layouts .ly:hover{border-color:var(--muted)}
+.layouts .ly[data-on="1"]{border-color:var(--ink);background:var(--ink);color:#fff}
+.layouts .ly:disabled{opacity:.45;cursor:default}
+.layouts .ly .gl{width:20px;height:34px;border-radius:2px;overflow:hidden;display:flex;flex-direction:column;gap:1.5px}
+.layouts .ly .gl i{flex:1;background:#8E99AB;display:block}
+.layouts .ly .gl i.ast{background:#C8A2AE}
+.layouts .ly .gl i.crd{background:var(--signal)}

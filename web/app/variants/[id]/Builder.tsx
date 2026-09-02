@@ -17,7 +17,7 @@ import { useRouter } from "next/navigation";
 import ColorPicker from "./ColorPicker";
 import { exportFilename } from "@/lib/adname";
 import {
-  clampTransform, DEFAULT_TRANSFORM, framedHigh, RATIO_SIZES,
+  clampTransform, DEFAULT_TRANSFORM, framedHigh, framedLow, RATIO_SIZES,
   type Reframe,
 } from "@/lib/reframe";
 
@@ -194,6 +194,7 @@ export default function Builder({
   compare = null, compareOn = false, onCompareToggle,
   onJumpToRename, registerFlush, registerApi, onDataChanged,
   selScene, onSelectScene, scenesSlot, readOnly = false, dataVersion = 0,
+  onExportVariant,
 }: {
   variant: VariantInfo; scenes: Scene[]; crops: Crop[];
   assets: Asset[]; presets: Preset[]; words: Word[]; workerUp: boolean;
@@ -207,6 +208,7 @@ export default function Builder({
   selScene: number;
   onSelectScene: (i: number) => void;
   dataVersion?: number;
+  onExportVariant?: () => void;
   scenesSlot?: React.ReactNode;
   readOnly?: boolean;
 }) {
@@ -728,9 +730,12 @@ export default function Builder({
 
   const near = (a: number, b: number) => Math.abs(a - b) < 0.005;
   const rfHigh = framedHigh(srcW, srcH, fw, fh);
+  const rfLow = framedLow(srcW, srcH, fw, fh);
   const rfPreset = rf.mode === "fit" ? "fit"
     : near(rf.x, 0) && near(rf.y, 0) && near(rf.scale, 1) ? "centre"
-    : near(rf.x, rfHigh.x) && near(rf.y, rfHigh.y) && near(rf.scale, rfHigh.scale) ? "high"
+    : near(rf.x, rfHigh.x) && near(rf.y, rfHigh.y) && near(rf.scale, rfHigh.scale)
+      && (rfHigh.y !== 0 || rfHigh.x !== 0 || rfHigh.scale !== 1) ? "high"
+    : near(rf.x, rfLow.x) && near(rf.y, rfLow.y) && near(rf.scale, rfLow.scale) ? "low"
     : "custom";
 
   // drag to pan (shift constrains to one axis); wheel/pinch to scale
@@ -1235,6 +1240,7 @@ export default function Builder({
 
   // ================= render =================
   return (
+    <div className="build-wrap">
     <div className="build">
       <div>
         {/* one 40px bar replaces the old title block */}
@@ -1243,48 +1249,8 @@ export default function Builder({
             onClick={() => onJumpToRename?.()}>
             {variant.name}
           </button>
-          <span className="tag mk-pill">{variant.label}</span>
+          <span className="vbar-meta mono">variant {variant.label} · {clipDur.toFixed(1)}s</span>
           <span className="tag">{variant.status.replace("_", " ")}</span>
-          {variant.status === "draft" && !readOnly && (
-            <button className="btn ghost sm" disabled={moving}
-              onClick={() => void moveStatus("in_review")}>Submit</button>
-          )}
-          {variant.status === "in_review" && !readOnly && (
-            <button className="btn ghost sm" disabled={moving}
-              onClick={() => void moveStatus("approved")}>Approve</button>
-          )}
-          {variant.renderStatus && (
-            <span className={variant.renderStatus === "done" ? "tag ok"
-              : variant.renderStatus === "failed" ? "tag flag" : "tag"}
-              title={variant.renderError ?? undefined}>
-              {variant.renderStatus === "done" ? "rendered" : variant.renderStatus}
-            </span>
-          )}
-          {(variant.ratios?.length ?? 0) > 0 && (
-            <span className="vbar-dl" title="Finished renders — download the burned MP4 (SRT sidecar in the menu)">
-              {variant.ratios!.map((rt) => (
-                <a key={rt} className="exchip"
-                  href={`/api/exports/${variant.id}/${rt}.mp4?dl=${encodeURIComponent(
-                    exportFilename({ videoSource: variant.videoSource ?? "longform",
-                      name: variant.name, label: variant.label }, rt, "mp4"))}`}>
-                  ↓ {RATIOS[rt]?.label ?? rt}
-                </a>
-              ))}
-              <a className="exchip" title="Subtitle sidecar — same remapped words as the burn"
-                href={`/api/exports/${variant.id}/${variant.ratios![0]}.srt?dl=${encodeURIComponent(
-                  exportFilename({ videoSource: variant.videoSource ?? "longform",
-                    name: variant.name, label: variant.label }, variant.ratios![0], "srt"))}`}>
-                ↓ SRT
-              </a>
-            </span>
-          )}
-          {(stale || staleR.includes(bRatio)) && (
-            <span className="tag flag"
-              title={stale ? "Changed since the last render"
-                : `Reframe changed for ${RATIOS[bRatio].label} since its last render`}>
-              stale
-            </span>
-          )}
           {readOnly && <span className="tag flag">source removed</span>}
           {compare && !readOnly && (
             <button className="chip" data-on={compareOn ? "1" : undefined}
@@ -1293,85 +1259,45 @@ export default function Builder({
               Compare
             </button>
           )}
-          <i className="chipsep" />
-          <div className="seg rset">
-            {exRatios.map((r) => (
-              <span key={r} className="rtab">
-                <button data-on={bRatio === r ? "1" : undefined}
-                  title={`${RATIOS[r].use} · ${RATIOS[r].px}`}
-                  onClick={() => setBRatio(r)}>
-                  {RATIOS[r].label}
-                  {rfMap[r] ? " ●" : ""}
-                </button>
-                {exRatios.length > 1 && !readOnly && (
-                  <button className="rx" aria-label={`Remove ${RATIOS[r].label} from the export set`}
-                    title="Remove from this variant's export set — it won't render or export"
-                    onClick={() => void saveExportRatios(exRatios.filter((x) => x !== r))}>
-                    ×
-                  </button>
-                )}
-              </span>
-            ))}
-            {exRatios.length < Object.keys(RATIOS).length && !readOnly && (
-              <span className="rtab radd">
-                <button aria-label="Add a ratio to the export set"
-                  data-on={addRatioOpen ? "1" : undefined}
-                  onClick={() => setAddRatioOpen((o) => !o)}>+</button>
-                {addRatioOpen && (
-                  <div className="addmenu on" style={{ minWidth: 130 }}>
-                    {Object.keys(RATIOS).filter((r) => !exRatios.includes(r)).map((r) => (
-                      <button key={r}
-                        onClick={() => void saveExportRatios([...exRatios, r])}>
-                        {RATIOS[r].label} <span style={{ color: "var(--faint)" }}>{RATIOS[r].use}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </span>
-            )}
-          </div>
-          <label className="zone-tog">
-            <input type="checkbox" checked={zones} onChange={(e) => setZones(e.target.checked)} />
-            {" "}Safe zones
-          </label>
-          {!readOnly && (
-            <div className="seg rfseg" title="Reframe presets for this ratio">
-              <button data-on={rfPreset === "centre" ? "1" : undefined}
-                onClick={() => setRf({ ...DEFAULT_TRANSFORM, fit_color: rf.fit_color })}>
-                Centre
-              </button>
-              <button data-on={rfPreset === "high" ? "1" : undefined}
-                title="Window at the top of the source — the old default"
-                onClick={() => setRf({ ...rfHigh, fit_color: rf.fit_color })}>
-                High
-              </button>
-              <button data-on={rfPreset === "fit" ? "1" : undefined}
-                title="Letterbox the whole source — colour from the brand swatches"
-                onClick={() => setRf({ ...rf, mode: "fit" })}>
-                Fit
-              </button>
-              {rfPreset === "custom" && (
-                <button data-on="1" style={{ cursor: "default" }}>Custom</button>
-              )}
-            </div>
-          )}
-          {rf.mode === "fit" && !readOnly && (
-            <span className="swatches rf-fit" title="Letterbox colour (stored per ratio)">
-              {["#0A0B0D", "#FFFFFF", "#FFC629", "#14403C"].map((c) => (
-                <button key={c} className="sw" style={{ background: c }}
-                  data-on={rf.fit_color.toUpperCase() === c ? "1" : undefined}
-                  aria-label={`Letterbox ${c}`}
-                  onClick={() => setRf({ ...rf, fit_color: c })} />
-              ))}
-            </span>
-          )}
-          <span className="tag" title="Scene template shape">
-            {shape === "custom" ? "Custom"
-              : { plain: "Plain", product: "Product split", hookfirst: "Hook first + card" }[shape]}
-          </span>
           <span style={{ flex: 1 }} />
           <a className="vbar-link" href={`/videos/${variant.videoId}`}>Back to transcript</a>
           <a className="vbar-link" href={`/variants/${variant.id}/preview`}>Preview</a>
+        </div>
+
+        {/* export ratios: tick = in the export set; label click = view/frame */}
+        <div className="ratios">
+          {Object.keys(RATIOS).map((r) => {
+            const ticked = exRatios.includes(r);
+            const framed = !!rfMap[r];
+            const isStale = staleR.includes(r);
+            return (
+              <span key={r} className="rt" data-view={bRatio === r ? "1" : undefined}
+                data-sel={ticked ? "1" : undefined}>
+                <button className="rt-cb" disabled={readOnly}
+                  aria-label={`${ticked ? "Remove" : "Add"} ${RATIOS[r].label} ${ticked ? "from" : "to"} the export set`}
+                  title={ticked && exRatios.length === 1
+                    ? "The export set needs at least one ratio"
+                    : ticked ? "Remove from the export set — it won't render or export"
+                    : "Include in the export"}
+                  onClick={() => {
+                    if (ticked && exRatios.length === 1) return;
+                    void saveExportRatios(ticked
+                      ? exRatios.filter((x) => x !== r) : [...exRatios, r]);
+                  }}>
+                  <span className="cb" />
+                </button>
+                <button className="rt-lbl" title={`${RATIOS[r].use} · ${RATIOS[r].px} — click to view and frame`}
+                  onClick={() => setBRatio(r)}>
+                  <span className="lbl mono">{RATIOS[r].label}</span>
+                  <span className={`st mono${framed ? " ok" : ticked ? " warn" : ""}`}>
+                    {framed ? (isStale ? "framed · stale" : "framed")
+                      : ticked ? "not framed" : "—"}
+                  </span>
+                </button>
+              </span>
+            );
+          })}
+          <span className="ratio-help">Tick to include in the export. Click the label to view and frame that ratio.</span>
         </div>
 
         {compareOn && compare && (
@@ -1654,6 +1580,51 @@ export default function Builder({
           </div>
         </div>
 
+        <div className="frametools">
+          <span className="eyebrow">Framing</span>
+          {!readOnly && (
+            <div className="seg rfseg" title="Reframe presets for this ratio">
+              <button data-on={rfPreset === "centre" ? "1" : undefined}
+                onClick={() => setRf({ ...DEFAULT_TRANSFORM, fit_color: rf.fit_color })}>
+                Centre
+              </button>
+              <button data-on={rfPreset === "high" ? "1" : undefined}
+                title="Window at the top of the source"
+                onClick={() => setRf({ ...rfHigh, fit_color: rf.fit_color })}>
+                High
+              </button>
+              <button data-on={rfPreset === "low" ? "1" : undefined}
+                title="Window at the bottom of the source"
+                onClick={() => setRf({ ...framedLow(srcW, srcH, fw, fh), fit_color: rf.fit_color })}>
+                Low
+              </button>
+              <button data-on={rfPreset === "fit" ? "1" : undefined}
+                title="Letterbox the whole source — colour from the brand swatches"
+                onClick={() => setRf({ ...rf, mode: "fit" })}>
+                Fit
+              </button>
+            </div>
+          )}
+          {rf.mode === "fit" && !readOnly && (
+            <span className="swatches rf-fit" title="Letterbox colour (stored per ratio)">
+              {["#0A0B0D", "#FFFFFF", "#FFC629", "#14403C"].map((c) => (
+                <button key={c} className="sw" style={{ background: c }}
+                  data-on={rf.fit_color.toUpperCase() === c ? "1" : undefined}
+                  aria-label={`Letterbox ${c}`}
+                  onClick={() => setRf({ ...rf, fit_color: c })} />
+              ))}
+            </span>
+          )}
+          <label className="zone-tog">
+            <input type="checkbox" checked={zones} onChange={(e) => setZones(e.target.checked)} />
+            {" "}Safe zones
+          </label>
+          <span style={{ flex: 1 }} />
+          {rfPreset === "custom" && (
+            <span className="mono" style={{ fontSize: 10.5, color: "var(--faint)" }}>custom · dragged</span>
+          )}
+        </div>
+
         {/* filmstrip trim */}
         <div className="strip"
           onPointerDown={(e) => {
@@ -1797,6 +1768,37 @@ export default function Builder({
             scene.layout.startsWith("split")
               ? `${Math.round(scene.splitRatio * 100)}/${Math.round((1 - scene.splitRatio) * 100)}`
               : null].filter(Boolean).join(" · ") : ""}>
+          {scene && !readOnly && (
+            <div className="layouts">
+              {([["full", "Full frame", false], ["split_product", "Product split", true],
+                 ["split_speakers", "Two speakers", true], ["card", "End card", false]] as const)
+                .map(([l, lbl, needsAsset]) => {
+                  const cardToSource = scene.layout === "card" && l !== "card" && scene.in === null;
+                  const dis = busy || cardToSource || (needsAsset && !assets.length);
+                  return (
+                    <button key={l} className="ly" data-on={scene.layout === l ? "1" : undefined}
+                      disabled={dis}
+                      title={cardToSource ? "This card has no source footage"
+                        : needsAsset && !assets.length
+                          ? "needs a brand asset — the assets library is empty" : undefined}
+                      onClick={() => {
+                        const patch: Record<string, unknown> = { layout: l };
+                        if (l === "card" && !scene.dur) patch.duration_s = 2.5;
+                        if (l === "split_product") patch.split_ratio = scene.splitRatio || 0.6;
+                        void call(`/api/scenes/${scene.id}`, "PATCH", patch);
+                      }}>
+                      <span className="gl">
+                        {l === "full" && <i />}
+                        {l === "split_product" && <><i /><i className="ast" /></>}
+                        {l === "split_speakers" && <><i /><i /></>}
+                        {l === "card" && <i className="crd" />}
+                      </span>
+                      {lbl}
+                    </button>
+                  );
+                })}
+            </div>
+          )}
           {scene && (scene.layout === "split_product" || scene.layout === "card") && (
             <div className="ctrl">
               <label htmlFor="slot">{scene.layout === "card" ? "Card asset" : "Lower slot"}</label>
@@ -2195,6 +2197,69 @@ export default function Builder({
           </p>
         )}
       </div>
+    </div>
+
+    {/* action bar: warnings at the moment they matter, then the actions */}
+    <div className="build-actions">
+      {(() => {
+        const unframed = exRatios.find((r) => !rfMap[r]);
+        if (!unframed) return null;
+        const via916 = unframed !== "9x16" && rfMap["9x16"];
+        return (
+          <span className="warnrow">
+            <span className="dotw" />
+            {RATIOS[unframed].label} is ticked but not framed — it will
+            {via916 ? " reuse the 9:16 framing" : " centre-crop"}
+          </span>
+        );
+      })()}
+      {variant.renderStatus === "failed" && (
+        <span className="warnrow" title={variant.renderError ?? undefined}>
+          <span className="dotw bad" />
+          last render failed{variant.renderError ? ` — ${variant.renderError.slice(0, 70)}` : ""}
+        </span>
+      )}
+      {(stale || staleR.length > 0) && (
+        <span className="warnrow">
+          <span className="dotw" />
+          changed since the last render — stale ratios re-render on export
+        </span>
+      )}
+      <span style={{ flex: 1 }} />
+      {(variant.ratios?.length ?? 0) > 0 && (
+        <span className="vbar-dl" title="Finished renders — burned MP4 + SRT sidecar">
+          {variant.ratios!.map((rt) => (
+            <a key={rt} className="exchip"
+              href={`/api/exports/${variant.id}/${rt}.mp4?dl=${encodeURIComponent(
+                exportFilename({ videoSource: variant.videoSource ?? "longform",
+                  name: variant.name, label: variant.label }, rt, "mp4"))}`}>
+              ↓ {RATIOS[rt]?.label ?? rt}
+            </a>
+          ))}
+          <a className="exchip" title="Subtitle sidecar — same remapped words as the burn"
+            href={`/api/exports/${variant.id}/${variant.ratios![0]}.srt?dl=${encodeURIComponent(
+              exportFilename({ videoSource: variant.videoSource ?? "longform",
+                name: variant.name, label: variant.label }, variant.ratios![0], "srt"))}`}>
+            ↓ SRT
+          </a>
+        </span>
+      )}
+      {!readOnly && (
+        <button className="btn ghost sm" disabled={busy}
+          title="Renders every ticked ratio for this variant — stale first"
+          onClick={() => onExportVariant?.()}>
+          Export MP4
+        </button>
+      )}
+      {variant.status === "draft" && !readOnly && (
+        <button className="btn-signal" disabled={moving}
+          onClick={() => void moveStatus("in_review")}>Submit for review</button>
+      )}
+      {variant.status === "in_review" && !readOnly && (
+        <button className="btn-signal" disabled={moving}
+          onClick={() => void moveStatus("approved")}>Approve</button>
+      )}
+    </div>
     </div>
   );
 }

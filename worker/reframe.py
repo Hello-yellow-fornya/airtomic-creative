@@ -87,6 +87,19 @@ def clamp_transform(
     }
 
 
+def framed_low(src_w: float, src_h: float,
+               frame_w: float, frame_h: float) -> dict[str, Any]:
+    """Mirror of framed_high: window at the BOTTOM of the source for
+    height-cropping ratios; centre for full-height ratios."""
+    win = transform_to_window(dict(DEFAULT_TRANSFORM), src_w, src_h, frame_w, frame_h)
+    if win["h"] >= 0.999:
+        return {**DEFAULT_TRANSFORM}
+    t = window_to_transform(
+        {"x": win["x"], "y": 1 - win["h"], "w": win["w"], "h": win["h"]},
+        src_w, src_h, frame_w, frame_h)
+    return {**DEFAULT_TRANSFORM, **t}
+
+
 def framed_high(src_w: float, src_h: float,
                 frame_w: float, frame_h: float) -> dict[str, Any]:
     """The old default: for ratios that crop HEIGHT (1.91:1 from 16:9) the

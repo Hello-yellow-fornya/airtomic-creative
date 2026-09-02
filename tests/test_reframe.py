@@ -46,3 +46,11 @@ def test_framed_high_puts_height_crop_at_top():
     assert abs(win["y"]) < 1e-9          # window top at source top
     # full-height ratios have no vertical freedom: framed high == centre
     assert framed_high(1920, 1080, 1080, 1920)["y"] == 0
+
+
+def test_framed_low_puts_height_crop_at_bottom():
+    from worker.reframe import framed_low
+    t = framed_low(1920, 1080, 1200, 628)
+    win = transform_to_window(t, 1920, 1080, 1200, 628)
+    assert abs(win["y"] + win["h"] - 1.0) < 1e-9   # window bottom at source bottom
+    assert framed_low(1920, 1080, 1080, 1920)["y"] == 0  # full-height: centre

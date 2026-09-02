@@ -434,6 +434,31 @@ export default function Workbench({ initialVariantId, workerUp }: {
     setNote(errs.length ? `some renders were refused: ${errs.join(", ")}` : null);
     refreshPayload();
   }
+  /** Export just ONE variant (the loaded one) — every ticked ratio,
+   * stale ratios first; progress lands in the strip like a bulk export. */
+  async function exportOne(id: string) {
+    const g = byId.get(id);
+    if (!g || busy) return;
+    setBusy(true);
+    const set = g.exportRatios?.length ? g.exportRatios : ["9x16"];
+    const ordered = [...set].sort((a, b) =>
+      Number((g.staleRatios ?? []).includes(b)) - Number((g.staleRatios ?? []).includes(a)));
+    const jobs: { variantId: string; ratio: string }[] = [];
+    const errs: string[] = [];
+    for (const ratio of ordered) {
+      const res = await fetch(`/api/variants/${id}/render`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ratio }),
+      });
+      if (res.ok) jobs.push({ variantId: id, ratio });
+      else errs.push(ratio);
+    }
+    setBusy(false);
+    setExportRun({ jobs });
+    setNote(errs.length ? `some renders were refused: ${errs.join(", ")}` : null);
+    refreshPayload();
+  }
+
   // poll while an export run has unfinished jobs
   useEffect(() => {
     if (!exportRun) return;
@@ -882,6 +907,7 @@ export default function Workbench({ initialVariantId, workerUp }: {
         selScene={selScene}
         onSelectScene={setSelScene}
         dataVersion={dataVersion}
+        onExportVariant={() => { if (selId) void exportOne(selId); }}
         scenesSlot={rowsStrip}
         readOnly={orphan}
       />
