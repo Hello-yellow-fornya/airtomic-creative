@@ -361,13 +361,48 @@ export default function Workbench({ initialVariantId, workerUp }: {
     return res.json().catch(() => ({}));
   }, [refreshPayload]);
 
+  const [splitNote, setSplitNote] = useState<string | null>(null);
+  const splitNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function flashSplitNote(msg: string) {
+    setSplitNote(msg);
+    if (splitNoteTimer.current) clearTimeout(splitNoteTimer.current);
+    splitNoteTimer.current = setTimeout(() => setSplitNote(null), 5000);
+  }
+  /** Split the scene UNDER THE PLAYHEAD (not the selected one) at the
+   * playhead. The playhead lives on the output timeline; the split API
+   * takes an absolute source time — walk the scenes to map one to the
+   * other. (Passing output time directly meant every clip whose source
+   * didn't start near 0 was refused as "too close to a scene edge".) */
   async function splitAtPlayhead() {
     if (!payload || orphan) return;
-    const scene = payload.scenes[Math.min(selScene, payload.scenes.length - 1)];
-    if (!scene || scene.layout === "card") return;
-    const at = apiRef.current?.getPlayheadS();
-    if (at === undefined) return;
-    await call(`/api/scenes/${scene.id}/split`, "POST", { at_s: at });
+    const t = apiRef.current?.getPlayheadS();
+    if (t === undefined) return;
+    let acc = 0;
+    for (const s of payload.scenes) {
+      const dur = s.layout === "card" ? (s.dur ?? 2.5) : (s.out ?? 0) - (s.in ?? 0);
+      if (t < acc + dur || s === payload.scenes[payload.scenes.length - 1]) {
+        if (s.layout === "card") {
+          flashSplitNote("the playhead is on an end card — cards can't be split");
+          return;
+        }
+        const atSrc = (s.in ?? 0) + Math.min(Math.max(t - acc, 0), dur);
+        const res = await fetch(`/api/scenes/${s.id}/split`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ at_s: atSrc }),
+        });
+        if (res.ok) {
+          flashSplitNote(`split at ${t.toFixed(1)}s`);
+          refreshPayload();
+        } else {
+          const b = await res.json().catch(() => ({}));
+          flashSplitNote(b.error === "split point too close to a scene edge"
+            ? `can't split at ${t.toFixed(1)}s — move the playhead at least 0.5s from a scene edge`
+            : (b.error ?? "split failed"));
+        }
+        return;
+      }
+      acc += dur;
+    }
   }
 
   // ----- bulk actions -----
@@ -535,6 +570,7 @@ export default function Workbench({ initialVariantId, workerUp }: {
           </span>
         )}
         <span style={{ flex: 1 }} />
+        {splitNote && <span className="split-note">{splitNote}</span>}
         <button className="btn ghost sm" disabled={busy || orphan}
           onClick={() => void splitAtPlayhead()}>
           Split at playhead

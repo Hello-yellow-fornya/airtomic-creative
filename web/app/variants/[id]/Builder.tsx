@@ -1138,8 +1138,11 @@ export default function Builder({
 
   // expose the playhead (source seconds) so the workbench header's
   // "Split at playhead" can act on the loaded variant
+  // the OUTPUT-timeline playhead — consumers (split-at-playhead) map it
+  // to a scene + source time themselves; IN+t is only a source time for
+  // a single-scene clip
   const tRef = useRef(0);
-  useEffect(() => { tRef.current = IN + t; });
+  useEffect(() => { tRef.current = t; });
   useEffect(() => {
     registerApi?.({ getPlayheadS: () => tRef.current });
   }, [registerApi]);

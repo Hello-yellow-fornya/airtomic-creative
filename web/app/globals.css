@@ -1222,3 +1222,7 @@ table.lib-list tbody tr:hover td{background:var(--paper)}
 .layouts .ly .gl i{flex:1;background:#8E99AB;display:block}
 .layouts .ly .gl i.ast{background:#C8A2AE}
 .layouts .ly .gl i.crd{background:var(--signal)}
+
+/* Split feedback, adjacent to the button that caused it */
+.split-note{font-size:11px;color:#7A5A00;background:#FFF6DC;border:1px solid #F0DCA0;
+  border-radius:var(--radius);padding:3px 9px;white-space:nowrap}
