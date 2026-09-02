@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { pool } from "@/lib/db";
 import { markStaleVariant } from "@/lib/variants";
+import { SPLIT_EDGE_S } from "@/lib/splitrules";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,7 @@ export async function POST(
     }
     const sIn = parseFloat(s.source_in_s);
     const sOut = parseFloat(s.source_out_s);
-    if (at <= sIn + 0.5 || at >= sOut - 0.5) {
+    if (at <= sIn + SPLIT_EDGE_S || at >= sOut - SPLIT_EDGE_S) {
       await client.query("ROLLBACK");
       return NextResponse.json(
         { error: "split point too close to a scene edge" },

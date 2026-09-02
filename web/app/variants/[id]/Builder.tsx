@@ -16,6 +16,7 @@ import {
 import { useRouter } from "next/navigation";
 import ColorPicker from "./ColorPicker";
 import { exportFilename } from "@/lib/adname";
+import { SPLIT_EDGE_S } from "@/lib/splitrules";
 import {
   clampTransform, DEFAULT_TRANSFORM, framedHigh, framedLow, RATIO_SIZES,
   type Reframe,
@@ -695,6 +696,7 @@ export default function Builder({
   const frameAr = fw / fh;
 
   const srcRef = useRef<HTMLDivElement>(null);
+  const cutLineRef = useRef<HTMLElement>(null);
   const [dragging, setDragging] = useState(false);
 
   // "drag to reframe" shows on the first hover only, then stays hidden
@@ -1633,6 +1635,27 @@ export default function Builder({
           onPointerDown={(e) => {
             if ((e.target as Element).closest(".hnd")) return;
             seek(timeAt(e.clientX) - IN);
+          }}
+          onPointerMove={(e) => {
+            const line = cutLineRef.current;
+            const rail = stripRef.current;
+            if (!line || !rail) return;
+            const r = rail.getBoundingClientRect();
+            const frac = (e.clientX - r.left) / r.width;
+            const h = a0 + frac * span;          // hover position, source time
+            if (h < IN || h > OUT || frac < 0 || frac > 1) {
+              line.style.display = "none";
+              return;
+            }
+            const legal = scenes.some((sc) =>
+              sc.layout !== "card" && sc.in !== null && sc.out !== null &&
+              h > sc.in + SPLIT_EDGE_S && h < sc.out - SPLIT_EDGE_S);
+            line.style.display = "block";
+            line.style.left = `${frac * 100}%`;
+            line.classList.toggle("dead", !legal);
+          }}
+          onPointerLeave={() => {
+            if (cutLineRef.current) cutLineRef.current.style.display = "none";
           }}>
           <div className="strip-rail" ref={stripRef}>
           <div className="frames">
@@ -1668,6 +1691,7 @@ export default function Builder({
             );
           })}
           <div className="strip-ph" style={{ left: `${((IN + Math.min(t, clipDur) - a0) / span) * 100}%` }} />
+          <i className="strip-cut" ref={cutLineRef} style={{ display: "none" }} />
           </div>
         </div>
         <div className="strip-scale">
